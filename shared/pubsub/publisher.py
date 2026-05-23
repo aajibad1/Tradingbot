@@ -32,6 +32,12 @@ class Topic(str, Enum):
     TRADE_FILLS = "arb-trade-fills"
     AI_PROPOSALS = "arb-ai-proposals"
     AUDIT_LOG = "arb-audit-log"
+    # Emitted by ``services/sentiment-service`` on every 4h refresh. The
+    # canonical decision signal lives in Redis (``sentiment:*``); this topic
+    # exists so the trade-ledger can stream sentiment history into BigQuery
+    # for backtesting + dashboard charts. Risk-engine does NOT subscribe —
+    # it reads Redis to keep the /evaluate hot path I/O-cheap and synchronous.
+    SENTIMENT_EVENTS = "arb-sentiment-events"
 
 
 class EventPublisher:

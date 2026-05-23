@@ -71,3 +71,36 @@ def test_tax_export_validates_year_range() -> None:
 
         resp = client.get("/tax-export?year=2101")
         assert resp.status_code == 422
+
+
+@patch("main.export_funding_income_year")
+@patch.dict(os.environ, {"GCP_PROJECT_ID": ""}, clear=True)
+def test_funding_income_endpoint_returns_csv(mock_export_funding) -> None:
+    """Verify /tax-export/funding-income returns CSV file with correct headers."""
+    mock_export_funding.return_value = (
+        "Trade ID,Asset,Long exchange,Short exchange,Date opened,Date closed,"
+        "Funding income (USD),Income type\n"
+        "t-1,BTC,kraken,hyperliquid,01/01/2026,01/02/2026,123.45,"
+        "funding_payment_ordinary_income\n"
+    )
+    from main import app
+
+    with TestClient(app) as client:
+        resp = client.get("/tax-export/funding-income?year=2026")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "text/csv; charset=utf-8"
+        assert "funding_income_2026.csv" in resp.headers["content-disposition"]
+        assert "funding_payment_ordinary_income" in resp.text
+
+
+@patch("main.export_funding_income_year")
+@patch.dict(os.environ, {"GCP_PROJECT_ID": ""}, clear=True)
+def test_funding_income_endpoint_handles_errors(mock_export_funding) -> None:
+    mock_export_funding.side_effect = RuntimeError("BigQuery error")
+
+    from main import app
+
+    with TestClient(app) as client:
+        resp = client.get("/tax-export/funding-income?year=2026")
+        assert resp.status_code == 500
+        assert "BigQuery error" in resp.json()["detail"]
