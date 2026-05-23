@@ -39,6 +39,7 @@ jobs:
           - ai-ops-agent
           - execution-orchestrator
           - sentiment-service
+          - dashboard-api
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
     steps:

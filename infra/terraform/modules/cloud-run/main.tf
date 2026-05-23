@@ -151,3 +151,36 @@ resource "google_cloud_run_v2_service" "svc" {
     google_secret_manager_secret_iam_member.accessor,
   ]
 }
+
+# ---------------------------------------------------------------------------
+# Public invocation — only enabled for explicitly opt-in services (today,
+# just dashboard-api). Default-deny everything else.
+# ---------------------------------------------------------------------------
+resource "google_cloud_run_v2_service_iam_member" "public_invoker" {
+  count    = var.allow_public_invoke ? 1 : 0
+  project  = var.project_id
+  location = google_cloud_run_v2_service.svc.location
+  name     = google_cloud_run_v2_service.svc.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+# ---------------------------------------------------------------------------
+# BigQuery read access — granted at the project level because BQ data
+# access has to be either project-wide or dataset-by-dataset, and our
+# dataset list is short enough that project-wide reader is fine. dataViewer
+# covers SELECT; jobUser is required to actually run a query.
+# ---------------------------------------------------------------------------
+resource "google_project_iam_member" "bigquery_dataviewer" {
+  count   = var.bigquery_reader ? 1 : 0
+  project = var.project_id
+  role    = "roles/bigquery.dataViewer"
+  member  = "serviceAccount:${google_service_account.svc.email}"
+}
+
+resource "google_project_iam_member" "bigquery_jobuser" {
+  count   = var.bigquery_reader ? 1 : 0
+  project = var.project_id
+  role    = "roles/bigquery.jobUser"
+  member  = "serviceAccount:${google_service_account.svc.email}"
+}

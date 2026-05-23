@@ -80,3 +80,24 @@ variable "labels" {
   type    = map(string)
   default = {}
 }
+
+variable "allow_public_invoke" {
+  description = <<-EOD
+    Grant ``allUsers`` ``roles/run.invoker``. Use sparingly — only the
+    dashboard-api currently needs to be reachable from a browser without
+    an ID token. Defaults to false so every other service stays
+    authenticated.
+  EOD
+  type        = bool
+  default     = false
+}
+
+variable "bigquery_reader" {
+  description = <<-EOD
+    Grant the service's runtime SA ``roles/bigquery.dataViewer`` +
+    ``roles/bigquery.jobUser`` so it can query the project's datasets.
+    Only the dashboard-api needs this today.
+  EOD
+  type        = bool
+  default     = false
+}

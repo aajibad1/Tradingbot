@@ -152,6 +152,18 @@ locals {
       subscribe_subs = []
       cpu_idle       = true
     }
+    # Dashboard-api — the only browser-facing service. Aggregates Redis +
+    # BigQuery into one /api/summary endpoint and serves the static dashboard.
+    # Public (allUsers/run.invoker) so a browser can hit it without an ID
+    # token. Read-only by design: no secrets, no Pub/Sub publish.
+    "dashboard-api" = {
+      secrets             = []
+      publish_topics      = []
+      subscribe_subs      = []
+      cpu_idle            = true
+      allow_public_invoke = true
+      bigquery_reader     = true
+    }
   }
 
   # Flat list of every distinct secret ID used anywhere in the system.
@@ -290,17 +302,19 @@ module "cloud_run" {
 
   for_each = local.services
 
-  project_id     = var.project_id
-  region         = var.region
-  service_name   = each.key
-  image          = "${local.artifact_registry_prefix}/${each.key}:${var.image_tag}"
-  min_instances  = var.cloud_run_min_instances
-  max_instances  = var.cloud_run_max_instances
-  cpu_idle       = each.value.cpu_idle
-  vpc_connector  = google_vpc_access_connector.connector.id
-  publish_topics = each.value.publish_topics
-  subscribe_subs = each.value.subscribe_subs
-  secrets        = each.value.secrets
+  project_id          = var.project_id
+  region              = var.region
+  service_name        = each.key
+  image               = "${local.artifact_registry_prefix}/${each.key}:${var.image_tag}"
+  min_instances       = var.cloud_run_min_instances
+  max_instances       = var.cloud_run_max_instances
+  cpu_idle            = each.value.cpu_idle
+  vpc_connector       = google_vpc_access_connector.connector.id
+  publish_topics      = each.value.publish_topics
+  subscribe_subs      = each.value.subscribe_subs
+  secrets             = each.value.secrets
+  allow_public_invoke = lookup(each.value, "allow_public_invoke", false)
+  bigquery_reader     = lookup(each.value, "bigquery_reader", false)
   env_vars = {
     GCP_PROJECT_ID = var.project_id
     ENVIRONMENT    = var.environment
