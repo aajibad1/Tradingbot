@@ -73,6 +73,7 @@ class CryptoPanicClient(SentimentClient):
         api_key: str | None = None,
         url: str = _CRYPTOPANIC_URL,
         timeout_s: float = 15.0,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.api_key = (
             api_key
@@ -86,6 +87,7 @@ class CryptoPanicClient(SentimentClient):
             )
         self.url = url
         self.timeout_s = timeout_s
+        self._transport = transport
 
     async def fetch(self) -> CryptoPanicResult:
         params = {
@@ -94,7 +96,9 @@ class CryptoPanicClient(SentimentClient):
             "kind": "news",
             "public": "true",
         }
-        async with httpx.AsyncClient(timeout=self.timeout_s) as client:
+        async with httpx.AsyncClient(
+            timeout=self.timeout_s, transport=self._transport
+        ) as client:
             response = await client.get(self.url, params=params)
             response.raise_for_status()
             payload = response.json()

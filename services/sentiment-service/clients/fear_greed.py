@@ -41,12 +41,21 @@ class FearGreedResult:
 class FearGreedClient(SentimentClient):
     name = "fear_greed"
 
-    def __init__(self, url: str = _FNG_URL, timeout_s: float = 10.0) -> None:
+    def __init__(
+        self,
+        url: str = _FNG_URL,
+        timeout_s: float = 10.0,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         self.url = url
         self.timeout_s = timeout_s
+        # ``transport`` is None in production; tests inject httpx.MockTransport.
+        self._transport = transport
 
     async def fetch(self) -> FearGreedResult:
-        async with httpx.AsyncClient(timeout=self.timeout_s) as client:
+        async with httpx.AsyncClient(
+            timeout=self.timeout_s, transport=self._transport
+        ) as client:
             response = await client.get(self.url)
             response.raise_for_status()
             payload = response.json()

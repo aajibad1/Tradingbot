@@ -38,6 +38,7 @@ jobs:
           - trade-ledger
           - ai-ops-agent
           - execution-orchestrator
+          - sentiment-service
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
     steps:
