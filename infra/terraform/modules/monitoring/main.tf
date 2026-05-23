@@ -8,14 +8,22 @@ terraform {
 }
 
 # ---------------------------------------------------------------------------
-# Notification channel — Slack webhook URL fetched from Secret Manager
+# Notification channel — Slack OAuth token fetched from Secret Manager
+#
+# Gated by ``enable_slack_alert_channel`` because GCP's native Slack channel
+# requires a Slack App OAuth bot token (``xoxb-...``), not a webhook URL.
+# When disabled, alert policies still fire — they just don't push to Slack;
+# you'll see them in the GCP Monitoring UI and (separately) the runtime
+# services still post to the SLACK_WEBHOOK_URL secret directly.
 # ---------------------------------------------------------------------------
 data "google_secret_manager_secret_version" "slack" {
+  count   = var.enable_slack_alert_channel ? 1 : 0
   project = var.project_id
   secret  = var.slack_webhook_secret_id
 }
 
 resource "google_monitoring_notification_channel" "slack" {
+  count        = var.enable_slack_alert_channel ? 1 : 0
   project      = var.project_id
   display_name = "Slack alerts (${var.environment})"
   type         = "slack"
@@ -23,8 +31,14 @@ resource "google_monitoring_notification_channel" "slack" {
     channel_name = "#arb-alerts"
   }
   sensitive_labels {
-    auth_token = data.google_secret_manager_secret_version.slack.secret_data
+    auth_token = data.google_secret_manager_secret_version.slack[0].secret_data
   }
+}
+
+locals {
+  notification_channels = var.enable_slack_alert_channel ? [
+    google_monitoring_notification_channel.slack[0].id
+  ] : []
 }
 
 # ---------------------------------------------------------------------------
@@ -66,7 +80,7 @@ resource "google_monitoring_alert_policy" "cloud_run_error_rate" {
     }
   }
 
-  notification_channels = [google_monitoring_notification_channel.slack.id]
+  notification_channels = local.notification_channels
   alert_strategy {
     auto_close = "1800s"
   }
@@ -95,7 +109,7 @@ resource "google_monitoring_alert_policy" "pubsub_backlog" {
     }
   }
 
-  notification_channels = [google_monitoring_notification_channel.slack.id]
+  notification_channels = local.notification_channels
   alert_strategy {
     auto_close = "1800s"
   }
@@ -124,7 +138,7 @@ resource "google_monitoring_alert_policy" "kill_switch" {
     }
   }
 
-  notification_channels = [google_monitoring_notification_channel.slack.id]
+  notification_channels = local.notification_channels
   alert_strategy {
     auto_close = "604800s"
   }
@@ -155,7 +169,7 @@ resource "google_monitoring_alert_policy" "exchange_latency" {
     }
   }
 
-  notification_channels = [google_monitoring_notification_channel.slack.id]
+  notification_channels = local.notification_channels
   alert_strategy {
     auto_close = "1800s"
   }
@@ -184,7 +198,7 @@ resource "google_monitoring_alert_policy" "daily_loss" {
     }
   }
 
-  notification_channels = [google_monitoring_notification_channel.slack.id]
+  notification_channels = local.notification_channels
   alert_strategy {
     auto_close = "86400s"
   }

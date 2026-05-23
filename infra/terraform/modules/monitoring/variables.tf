@@ -7,8 +7,33 @@ variable "environment" {
 }
 
 variable "slack_webhook_secret_id" {
-  description = "Secret Manager ID of the Slack incoming webhook URL."
+  description = <<-EOD
+    Secret Manager ID of the Slack incoming webhook URL.
+
+    NOTE: Only consumed when ``enable_slack_alert_channel = true``, which in
+    turn requires that the secret hold a Slack App OAuth bot token
+    (``xoxb-...``) — NOT a plain webhook URL. GCP Cloud Monitoring's native
+    Slack channel type validates with Slack's OAuth API and rejects
+    webhooks.
+
+    Runtime services post directly to the webhook URL via the
+    SLACK_WEBHOOK_URL env var (see services/risk-engine/rules/kill_switch.py
+    and services/execution-orchestrator/approval_gate.py). That path is
+    unaffected by this module's Slack channel toggle.
+  EOD
   type        = string
+}
+
+variable "enable_slack_alert_channel" {
+  description = <<-EOD
+    When true, create a GCP Cloud Monitoring Slack notification channel
+    using the secret named by ``slack_webhook_secret_id``. The secret value
+    must be a Slack App OAuth bot token. Defaults to false because the
+    secret most projects start with is an incoming webhook URL, which GCP's
+    Slack channel type rejects.
+  EOD
+  type        = bool
+  default     = false
 }
 
 variable "service_names" {
