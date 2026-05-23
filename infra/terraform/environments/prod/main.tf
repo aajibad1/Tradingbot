@@ -1,0 +1,65 @@
+terraform {
+  required_version = ">= 1.5.0"
+
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 6.0"
+    }
+    google-beta = {
+      source  = "hashicorp/google-beta"
+      version = "~> 6.0"
+    }
+  }
+
+  backend "gcs" {
+    prefix = "tf-state/crypto-arb/prod"
+  }
+}
+
+module "root" {
+  source = "../../"
+
+  project_id  = var.project_id
+  region      = var.region
+  environment = "prod"
+
+  # Production footprint — keep WebSocket collectors warm
+  cloud_run_min_instances = 1
+  cloud_run_max_instances = 10
+  redis_memory_size_gb    = 1
+  redis_tier              = "BASIC"
+
+  image_tag                = var.image_tag
+  enable_monitoring_alerts = true
+}
+
+variable "project_id" {
+  type    = string
+  default = "agenuit"
+}
+
+variable "region" {
+  type    = string
+  default = "us-central1"
+}
+
+variable "image_tag" {
+  type = string
+}
+
+output "cloud_run_service_urls" {
+  value = module.root.cloud_run_service_urls
+}
+
+output "pubsub_topics" {
+  value = module.root.pubsub_topics
+}
+
+output "bigquery_datasets" {
+  value = module.root.bigquery_datasets
+}
+
+output "redis_host" {
+  value = module.root.redis_host
+}

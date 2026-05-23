@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crypto-arb-system/schemas/opportunity_detected.json",
+  "title": "OpportunityDetected",
+  "type": "object",
+  "required": [
+    "id",
+    "strategy",
+    "asset",
+    "long_exchange",
+    "short_exchange",
+    "gross_spread_bps",
+    "trading_fees_bps",
+    "slippage_estimate_bps",
+    "net_edge_bps",
+    "confidence_score",
+    "recommended_size_usd",
+    "min_hold_hours",
+    "detected_at"
+  ],
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "strategy": {
+      "type": "string",
+      "enum": ["funding_rate_arb", "spot_perp_basis", "cross_exchange", "triangular"]
+    },
+    "asset": { "type": "string" },
+    "long_exchange": { "type": "string" },
+    "short_exchange": { "type": "string" },
+    "gross_spread_bps": { "type": "number" },
+    "trading_fees_bps": { "type": "number" },
+    "slippage_estimate_bps": { "type": "number" },
+    "funding_rate_annualized_pct": { "type": "number" },
+    "net_edge_bps": { "type": "number" },
+    "confidence_score": { "type": "number", "minimum": 0, "maximum": 1 },
+    "recommended_size_usd": { "type": "number", "exclusiveMinimum": 0 },
+    "min_hold_hours": { "type": "number", "minimum": 0 },
+    "detected_at": { "type": "string", "format": "date-time" },
+    "execute": { "type": "boolean", "default": false },
+    "rejection_reason": { "type": ["string", "null"] }
+  }
+}

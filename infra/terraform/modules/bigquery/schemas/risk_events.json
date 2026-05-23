@@ -1,0 +1,11 @@
+[
+  {"name": "alert_type", "type": "STRING", "mode": "REQUIRED", "description": "kill_switch_activated | drawdown_breach | position_limit | exchange_health | ..."},
+  {"name": "severity", "type": "STRING", "mode": "REQUIRED", "description": "info | warn | critical"},
+  {"name": "message", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "rule", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "observed", "type": "NUMERIC", "mode": "NULLABLE"},
+  {"name": "limit_value", "type": "NUMERIC", "mode": "NULLABLE", "description": "Renamed from reserved SQL keyword 'limit'."},
+  {"name": "source", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "emitted_at", "type": "TIMESTAMP", "mode": "REQUIRED"},
+  {"name": "ingested_at", "type": "TIMESTAMP", "mode": "REQUIRED", "defaultValueExpression": "CURRENT_TIMESTAMP()"}
+]

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crypto-arb-system/schemas/risk_alert.json",
+  "title": "RiskAlert",
+  "type": "object",
+  "required": ["alert_type", "severity", "message", "emitted_at"],
+  "properties": {
+    "alert_type": {
+      "type": "string",
+      "enum": [
+        "kill_switch_activated",
+        "kill_switch_reset",
+        "drawdown_breach",
+        "exchange_exposure_breach",
+        "asset_concentration_breach",
+        "leverage_breach",
+        "api_latency_breach",
+        "opportunity_rejected"
+      ]
+    },
+    "severity": { "type": "string", "enum": ["info", "warn", "critical"] },
+    "message": { "type": "string" },
+    "rule": { "type": ["string", "null"] },
+    "observed": { "type": ["number", "null"] },
+    "limit": { "type": ["number", "null"] },
+    "emitted_at": { "type": "string", "format": "date-time" },
+    "source": { "type": "string" }
+  }
+}

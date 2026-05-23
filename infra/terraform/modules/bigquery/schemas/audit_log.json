@@ -1,0 +1,9 @@
+[
+  {"name": "source", "type": "STRING", "mode": "REQUIRED", "description": "Emitting service name."},
+  {"name": "event", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "actor", "type": "STRING", "mode": "NULLABLE", "description": "human or ai-agent id"},
+  {"name": "payload_json", "type": "STRING", "mode": "NULLABLE", "description": "Original event payload as a JSON string."},
+  {"name": "correlation_id", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "emitted_at", "type": "TIMESTAMP", "mode": "REQUIRED"},
+  {"name": "ingested_at", "type": "TIMESTAMP", "mode": "REQUIRED", "defaultValueExpression": "CURRENT_TIMESTAMP()"}
+]

@@ -1,0 +1,208 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Detect which paths changed so we can short-circuit expensive jobs.
+  # ---------------------------------------------------------------------------
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      infra: ${{ steps.filter.outputs.infra }}
+      python: ${{ steps.filter.outputs.python }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            infra:
+              - 'infra/**'
+            python:
+              - 'services/**'
+              - 'shared/**'
+
+  # ---------------------------------------------------------------------------
+  # Python lint — ruff
+  # ---------------------------------------------------------------------------
+  lint-python:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install ruff==0.6.9
+      - run: ruff check services/ shared/
+
+  # ---------------------------------------------------------------------------
+  # Type check — mypy (allow missing imports because services pin their own deps)
+  # ---------------------------------------------------------------------------
+  typecheck:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install mypy==1.11.2 pydantic==2.9.2
+      - run: mypy --ignore-missing-imports --explicit-package-bases services/ shared/
+
+  # ---------------------------------------------------------------------------
+  # Tests — per-service PYTHONPATH (replicates Dockerfile pattern in CLAUDE.md)
+  # ---------------------------------------------------------------------------
+  tests:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - market-data
+          - funding-rate-service
+          - opportunity-engine
+          - risk-engine
+          - paper-trader
+          - trade-ledger
+          - ai-ops-agent
+          - execution-orchestrator
+    services:
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install service deps
+        run: |
+          if [ -f services/${{ matrix.service }}/requirements.txt ]; then
+            pip install -r services/${{ matrix.service }}/requirements.txt
+          fi
+          pip install pytest pytest-cov pytest-asyncio
+      - name: Run tests
+        env:
+          PYTHONPATH: ".:services/${{ matrix.service }}"
+          REDIS_URL: "redis://localhost:6379/0"
+        run: |
+          if [ -d services/${{ matrix.service }}/tests ]; then
+            pytest services/${{ matrix.service }}/tests -v \
+              --cov=services/${{ matrix.service }} \
+              --cov-report=term-missing \
+              --cov-fail-under=50
+          else
+            echo "no tests for ${{ matrix.service }} — skipping"
+          fi
+
+  # Separate gate for shared/ at 80% (per CLAUDE.md infra agent spec).
+  tests-shared:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install pydantic==2.9.2 pytest pytest-cov
+      - run: |
+          if [ -d shared/tests ]; then
+            PYTHONPATH=. pytest shared/tests -v \
+              --cov=shared --cov-report=term-missing --cov-fail-under=80
+          else
+            echo "shared/tests not present yet — skipping coverage gate"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Terraform — only when infra/ changed
+  # ---------------------------------------------------------------------------
+  terraform-validate:
+    needs: changes
+    if: needs.changes.outputs.infra == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        env: [dev, prod]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.5
+      - name: fmt
+        run: terraform -chdir=infra/terraform fmt -check -recursive
+      - name: init (no backend)
+        run: terraform -chdir=infra/terraform/environments/${{ matrix.env }} init -backend=false
+      - name: validate
+        run: terraform -chdir=infra/terraform/environments/${{ matrix.env }} validate
+
+  # ---------------------------------------------------------------------------
+  # Docker smoke build (no push) — every service
+  # ---------------------------------------------------------------------------
+  docker-build-smoke:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - market-data
+          - funding-rate-service
+          - opportunity-engine
+          - risk-engine
+          - paper-trader
+          - trade-ledger
+          - ai-ops-agent
+          - execution-orchestrator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/${{ matrix.service }}/Dockerfile
+          push: false
+          load: false
+          tags: ${{ matrix.service }}:ci
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,scope=${{ matrix.service }},mode=max
+
+  # ---------------------------------------------------------------------------
+  # Security — bandit, fail on HIGH severity
+  # ---------------------------------------------------------------------------
+  security-scan:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install bandit==1.7.10
+      - run: bandit -r services/ shared/ -ll -ii

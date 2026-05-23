@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets / env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+service-account-*.json
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Build artifacts
+dist/
+build/
+node_modules/
+
+# Local data
+data/
+*.db
+*.sqlite
+
+# Allow environment-specific tfvars (no secrets, just project_id)
+!infra/terraform/environments/*/terraform.tfvars

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crypto-arb-system/schemas/trade_executed.json",
+  "title": "TradeExecuted",
+  "type": "object",
+  "required": [
+    "id",
+    "opportunity_id",
+    "type",
+    "legs",
+    "gross_pnl_usd",
+    "net_pnl_usd",
+    "status",
+    "opened_at"
+  ],
+  "properties": {
+    "id": { "type": "string" },
+    "opportunity_id": { "type": "string" },
+    "type": { "type": "string", "enum": ["paper", "live"] },
+    "status": { "type": "string", "enum": ["open", "closed", "failed"] },
+    "legs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["exchange", "side", "asset", "size", "fill_price", "fee_usd", "slippage_usd", "filled_at"],
+        "properties": {
+          "exchange": { "type": "string" },
+          "side": { "type": "string", "enum": ["buy", "sell"] },
+          "asset": { "type": "string" },
+          "size": { "type": "number", "exclusiveMinimum": 0 },
+          "fill_price": { "type": "number", "exclusiveMinimum": 0 },
+          "fee_usd": { "type": "number", "minimum": 0 },
+          "slippage_usd": { "type": "number", "minimum": 0 },
+          "filled_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "gross_pnl_usd": { "type": "number" },
+    "net_pnl_usd": { "type": "number" },
+    "opened_at": { "type": "string", "format": "date-time" },
+    "closed_at": { "type": ["string", "null"], "format": "date-time" },
+    "funding_collected_usd": { "type": "number" },
+    "notes": { "type": "string" }
+  }
+}

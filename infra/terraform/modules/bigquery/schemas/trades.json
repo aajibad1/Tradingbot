@@ -1,0 +1,33 @@
+[
+  {"name": "trade_id", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "opportunity_id", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "trade_type", "type": "STRING", "mode": "REQUIRED", "description": "paper | live"},
+  {"name": "status", "type": "STRING", "mode": "REQUIRED", "description": "open | closed | failed"},
+  {"name": "asset", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "long_exchange", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "short_exchange", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "gross_pnl_usd", "type": "NUMERIC", "mode": "REQUIRED"},
+  {"name": "net_pnl_usd", "type": "NUMERIC", "mode": "REQUIRED"},
+  {"name": "total_fees_usd", "type": "NUMERIC", "mode": "REQUIRED"},
+  {"name": "total_slippage_usd", "type": "NUMERIC", "mode": "REQUIRED"},
+  {"name": "funding_collected_usd", "type": "NUMERIC", "mode": "REQUIRED", "defaultValueExpression": "0"},
+  {"name": "opened_at", "type": "TIMESTAMP", "mode": "REQUIRED"},
+  {"name": "closed_at", "type": "TIMESTAMP", "mode": "NULLABLE"},
+  {"name": "notes", "type": "STRING", "mode": "NULLABLE"},
+  {
+    "name": "legs",
+    "type": "RECORD",
+    "mode": "REPEATED",
+    "fields": [
+      {"name": "exchange", "type": "STRING", "mode": "NULLABLE"},
+      {"name": "side", "type": "STRING", "mode": "NULLABLE"},
+      {"name": "asset", "type": "STRING", "mode": "NULLABLE"},
+      {"name": "size", "type": "NUMERIC", "mode": "NULLABLE"},
+      {"name": "fill_price", "type": "NUMERIC", "mode": "NULLABLE"},
+      {"name": "fee_usd", "type": "NUMERIC", "mode": "NULLABLE"},
+      {"name": "slippage_usd", "type": "NUMERIC", "mode": "NULLABLE"},
+      {"name": "filled_at", "type": "TIMESTAMP", "mode": "NULLABLE"}
+    ]
+  },
+  {"name": "ingested_at", "type": "TIMESTAMP", "mode": "REQUIRED", "defaultValueExpression": "CURRENT_TIMESTAMP()"}
+]

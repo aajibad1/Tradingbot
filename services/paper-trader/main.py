@@ -1,0 +1,246 @@
+"""Paper-trader service — FastAPI.
+
+Takes a risk-engine-approved Opportunity, simulates execution with realistic
+fees/slippage/partial fills, runs the funding accrual + spread-collapse model,
+then publishes a Trade record to `arb-trade-fills` for the ledger to persist.
+
+Endpoints:
+  GET  /healthz
+  GET  /status
+  POST /simulate (manual trigger)
+
+Subscriber:
+  arb-opportunities → filters execute=True → simulates → publishes to arb-trade-fills
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import random
+import threading
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
+
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+from ledger import append_paper_trade
+from models import SimulateRequest, SimulateResponse
+from shared.models.opportunity import Opportunity
+from simulator.execution_model import new_trade_id, simulate_execution
+from simulator.funding_simulator import funding_period_hours, simulate_funding_payment
+from simulator.spread_collapse import sample_early_exit
+from shared.models.trade import Trade, TradeStatus, TradeType
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logger = logging.getLogger("paper-trader")
+
+_subscriber_future = None
+_trades_simulated = 0
+_trades_rejected = 0
+_lock = threading.Lock()
+
+
+def _on_opportunity(message) -> None:
+    """Callback for approved opportunities from Pub/Sub."""
+    global _trades_simulated, _trades_rejected
+
+    try:
+        opp = Opportunity.model_validate_json(message.data)
+    except Exception as e:
+        logger.error("failed to parse opportunity: %s", e)
+        message.ack()
+        return
+
+    with _lock:
+        if not opp.execute:
+            _trades_rejected += 1
+            logger.debug("opportunity id=%s rejected: execute=False", opp.id)
+            message.ack()
+            return
+        _trades_simulated += 1
+
+    logger.info("simulating opportunity id=%s strategy=%s net_edge=%.1f bps", opp.id, opp.strategy, opp.net_edge_bps)
+
+    # Simulate with default book depths (can be overridden via POST /simulate for testing)
+    req = SimulateRequest(
+        opportunity=opp,
+        long_reference_price=50_000.0,  # Placeholder — real price N/A in Pub/Sub flow
+        short_reference_price=50_050.0,
+        long_book_depth_usd=250_000.0,
+        short_book_depth_usd=250_000.0,
+    )
+    _simulate_internal(req)
+    message.ack()
+
+
+def _simulate_internal(req: SimulateRequest) -> Trade | None:
+    """Core simulation logic — reused by both Pub/Sub callback and POST endpoint."""
+    if not req.opportunity.execute:
+        logger.warning("opportunity id=%s not approved (execute=False)", req.opportunity.id)
+        return None
+
+    rng = random.Random()
+    now = datetime.utcnow()
+
+    # Simulate the two legs concurrently (logically simultaneous, latency-skewed).
+    long_leg = simulate_execution(
+        exchange=req.opportunity.long_exchange,
+        asset=req.opportunity.asset,
+        side="buy",
+        size_usd=req.opportunity.recommended_size_usd,
+        reference_price=req.long_reference_price,
+        book_depth_usd=req.long_book_depth_usd,
+        now=now,
+        rng=rng,
+    )
+    short_leg = simulate_execution(
+        exchange=req.opportunity.short_exchange,
+        asset=req.opportunity.asset,
+        side="sell",
+        size_usd=req.opportunity.recommended_size_usd,
+        reference_price=req.short_reference_price,
+        book_depth_usd=req.short_book_depth_usd,
+        now=now,
+        rng=rng,
+    )
+
+    # Hold horizon, possibly shortened by spread collapse.
+    planned_hours = max(req.opportunity.min_hold_hours, 1.0)
+    early_exit = sample_early_exit(planned_hours, rng=rng)
+    actual_hours = early_exit if early_exit is not None else planned_hours
+    closed_at = now + timedelta(hours=actual_hours)
+
+    # Funding accrued on the perp (short) leg. Convert annualized pct → per-period pct.
+    short_period_hours = funding_period_hours(req.opportunity.short_exchange)
+    periods_elapsed = int(actual_hours // short_period_hours)
+    funding_pct_per_period = (
+        req.opportunity.funding_rate_annualized_pct
+        * (short_period_hours / (365 * 24))
+    )
+    notional = req.opportunity.recommended_size_usd
+    funding_usd = simulate_funding_payment(
+        notional_usd=notional,
+        funding_rate_pct_per_period=funding_pct_per_period,
+        is_short_perp=True,
+        periods=periods_elapsed,
+    )
+
+    # Gross PnL = price convergence — assume the spread fully closes at exit
+    # when no early exit; otherwise the spread has only half-closed.
+    spread_capture_ratio = 0.5 if early_exit is not None else 1.0
+    gross_pnl = notional * (req.opportunity.gross_spread_bps / 10_000.0) * spread_capture_ratio
+
+    fees_usd = long_leg.leg.fee_usd + short_leg.leg.fee_usd
+    slippage_usd = long_leg.leg.slippage_usd + short_leg.leg.slippage_usd
+    net_pnl = gross_pnl + funding_usd - fees_usd - slippage_usd
+
+    trade = Trade(
+        id=new_trade_id(),
+        opportunity_id=req.opportunity.id,
+        type=TradeType.PAPER,
+        legs=[long_leg.leg, short_leg.leg],
+        gross_pnl_usd=gross_pnl,
+        net_pnl_usd=net_pnl,
+        status=TradeStatus.CLOSED,
+        opened_at=now,
+        closed_at=closed_at,
+        funding_collected_usd=funding_usd,
+        notes=(
+            f"early_exit={early_exit:.1f}h" if early_exit is not None
+            else f"held_full_horizon={planned_hours:.1f}h"
+        ),
+    )
+    append_paper_trade(trade)
+    logger.info("trade id=%s net_pnl=%.2f closed_at=%s", trade.id, net_pnl, closed_at)
+    return trade
+
+
+def _start_subscriber() -> None:
+    global _subscriber_future
+    if not os.environ.get("GCP_PROJECT_ID"):
+        logger.warning("GCP_PROJECT_ID unset — running without Pub/Sub subscriber (local mode)")
+        return
+
+    from google.cloud import pubsub_v1
+
+    project_id = os.environ["GCP_PROJECT_ID"]
+    subscription_name = os.environ.get("OPPORTUNITIES_SUBSCRIPTION", "arb-opportunities-paper-trader")
+
+    subscriber = pubsub_v1.SubscriberClient()
+    subscription_path = subscriber.subscription_path(project_id, subscription_name)
+
+    _subscriber_future = subscriber.subscribe(subscription_path, callback=_on_opportunity)
+    logger.info("subscribed to %s", subscription_path)
+
+
+def _stop_subscriber() -> None:
+    if _subscriber_future is not None:
+        _subscriber_future.cancel()
+        logger.info("subscriber stopped")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _start_subscriber()
+    try:
+        yield
+    finally:
+        _stop_subscriber()
+
+
+app = FastAPI(title="paper-trader", version="0.1.0", lifespan=lifespan)
+
+
+class StatusResponse(BaseModel):
+    trades_simulated: int
+    trades_rejected: int
+
+
+@app.get("/healthz")
+def healthz() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/status", response_model=StatusResponse)
+def status() -> StatusResponse:
+    with _lock:
+        return StatusResponse(
+            trades_simulated=_trades_simulated,
+            trades_rejected=_trades_rejected,
+        )
+
+
+@app.post("/simulate", response_model=SimulateResponse)
+def simulate(req: SimulateRequest) -> SimulateResponse:
+    """Manual simulation trigger — useful for testing and ops drills."""
+    if not req.opportunity.execute:
+        return SimulateResponse(
+            trade_id="",
+            accepted=False,
+            rejection_reason="opportunity not approved by risk-engine (execute=False)",
+            opened_at=datetime.utcnow(),
+        )
+
+    trade = _simulate_internal(req)
+    if trade is None:
+        return SimulateResponse(
+            trade_id="",
+            accepted=False,
+            rejection_reason="simulation failed",
+            opened_at=datetime.utcnow(),
+        )
+
+    return SimulateResponse(
+        trade_id=trade.id,
+        accepted=True,
+        net_pnl_usd=trade.net_pnl_usd,
+        gross_pnl_usd=trade.gross_pnl_usd,
+        fees_usd=sum(leg.fee_usd for leg in trade.legs),
+        slippage_usd=sum(leg.slippage_usd for leg in trade.legs),
+        funding_collected_usd=trade.funding_collected_usd,
+        opened_at=trade.opened_at,
+        closed_at=trade.closed_at,
+        notes=trade.notes,
+    )

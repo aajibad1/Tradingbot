@@ -1,0 +1,12 @@
+[
+  {"name": "exchange", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "asset", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "symbol", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "rate_per_period", "type": "NUMERIC", "mode": "REQUIRED"},
+  {"name": "period_hours", "type": "NUMERIC", "mode": "REQUIRED"},
+  {"name": "annualized_pct", "type": "NUMERIC", "mode": "REQUIRED"},
+  {"name": "next_funding_time", "type": "TIMESTAMP", "mode": "NULLABLE"},
+  {"name": "observed_at", "type": "TIMESTAMP", "mode": "REQUIRED"},
+  {"name": "source", "type": "STRING", "mode": "REQUIRED", "description": "coinglass | arbitrage_scanner | ccxt"},
+  {"name": "ingested_at", "type": "TIMESTAMP", "mode": "REQUIRED", "defaultValueExpression": "CURRENT_TIMESTAMP()"}
+]
