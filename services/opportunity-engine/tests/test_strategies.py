@@ -5,6 +5,7 @@ from scorer import score
 from shared.models.exchange_tick import ExchangeTick
 from shared.models.funding_rate import FundingRate
 from shared.models.opportunity import StrategyType
+from shared.utils.fee_calculator import MIN_VIABLE_NET_EDGE_BPS
 from strategies import CrossExchangeStrategy, FundingRateArbStrategy, SpotPerpBasisStrategy
 
 
@@ -108,11 +109,13 @@ def test_funding_rate_arb_skips_low_funding() -> None:
 
 
 def test_scorer_marks_viable_above_threshold() -> None:
+    """A 165-bp gross spread yields a net edge well above the 50-bp bar."""
     snap = MarketSnapshot()
     snap.update_tick(_tick("kraken", "BTC", 60_000.0, 60_010.0))
-    snap.update_tick(_tick("crypto.com", "BTC", 60_500.0, 60_510.0))
+    snap.update_tick(_tick("crypto.com", "BTC", 61_000.0, 61_010.0))
     cand = next(iter(CrossExchangeStrategy().evaluate(snap)))
     opp = score(cand)
     assert opp.strategy == StrategyType.CROSS_EXCHANGE
-    assert opp.net_edge_bps > 8.0  # above MIN_VIABLE_NET_EDGE_BPS
+    assert opp.net_edge_bps > MIN_VIABLE_NET_EDGE_BPS  # 50.0 bps
     assert opp.execute is False  # risk-engine still has to approve
+    assert opp.rejection_reason is None

@@ -1,0 +1,62 @@
+# Hummingbot funding-rate arb strategy config.
+#
+# Deployed as a long-running strategy script inside the Hummingbot container.
+# The execution-orchestrator does NOT spawn bots per trade — it calls this
+# bot's REST API to add positions when an opportunity is approved.
+#
+# Long spot + short perp on the same asset (delta neutral). PnL = funding
+# payments collected on the perp leg minus fees + slippage.
+
+strategy: funding_rate_arb
+template_version: 1.0
+
+# ---- Identity ------------------------------------------------------------
+bot_id: arb-funding-rate                # matches execution-orchestrator's HUMMINGBOT_BOT_ID
+
+# ---- Markets -------------------------------------------------------------
+markets:
+  spot:
+    # CCXT-style connector ID, then a comma-separated symbol list. The
+    # execution-orchestrator's HummingbotOrderRequest carries an explicit
+    # long_exchange — we accept orders for any of these connectors.
+    kraken:        ["BTC-USD", "ETH-USD", "SOL-USD"]
+    coinbase:      ["BTC-USD", "ETH-USD", "SOL-USD"]
+    crypto_com:    ["BTC-USDT", "ETH-USDT", "SOL-USDT"]
+  perp:
+    hyperliquid:   ["BTC-USD", "ETH-USD", "SOL-USD"]
+    kraken:        ["BTC-PERP", "ETH-PERP"]
+    crypto_com:    ["BTC-USDT-PERP", "ETH-USDT-PERP"]
+
+# ---- Sizing --------------------------------------------------------------
+# Per-position notional, in USD. The risk-engine has already gated this — we
+# trust the request. Caps here are a belt-and-suspenders backstop.
+order_size_usd_default: 10000
+order_size_usd_max:     25000
+
+# ---- Execution -----------------------------------------------------------
+order_type: market                      # taker fills — we accept the bps for speed
+slippage_tolerance_bps: 25              # abort the leg if fill price drifts > 25 bps
+max_open_positions:     5
+
+# ---- Hedging behaviour ---------------------------------------------------
+hedge_window_seconds: 3                 # max gap between long + short fills
+unhedge_on_partial_fill: true           # if one leg only partially fills, exit the other
+
+# ---- Risk integration ----------------------------------------------------
+# Hummingbot checks Redis kill switch before submitting orders. The same key
+# the risk-engine writes.
+risk_kill_switch_check:
+  redis_url_env: REDIS_URL
+  kill_switch_key: "risk:kill_switch:active"
+  active_value: "1"
+
+# ---- Hold horizon --------------------------------------------------------
+# A position is held until either:
+#   1. the funding-rate sign flips (per docs/STRATEGY_GUIDE.md), OR
+#   2. the basis collapses to < 50% of entry, OR
+#   3. `min_hold_hours` elapses AND net PnL > 0
+min_hold_hours_default: 4
+
+# ---- Logging / observability --------------------------------------------
+log_level: INFO
+emit_fills_to_orchestrator: true        # POST every fill back to execution-orchestrator

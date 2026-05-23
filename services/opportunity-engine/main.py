@@ -10,6 +10,13 @@ The hot path:
 Throttling avoids re-running every strategy on every tick (which would be
 ~thousands of evaluations per second). The risk-engine is the choke point —
 we publish freely and let it decide.
+
+The publish threshold is resolved each evaluation cycle via
+``shared.utils.fee_calculator.min_viable_net_edge_bps()`` which honors
+a Redis-backed dynamic override at ``opportunity:dynamic_min_spread``.
+The env-var ``PUBLISH_NET_EDGE_THRESHOLD_BPS`` is treated as a hard floor:
+the publisher applies ``max(env_floor, dynamic)`` so an operator can
+temporarily raise the bar without code changes.
 """
 
 from __future__ import annotations
@@ -21,14 +28,15 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from models import EngineStatus, MarketSnapshot
 from scorer import score
 from shared.models.exchange_tick import ExchangeTick
 from shared.models.funding_rate import FundingRate
 from shared.pubsub.publisher import Topic, get_publisher
-from shared.utils.fee_calculator import MIN_VIABLE_NET_EDGE_BPS
+from shared.utils.fee_calculator import MIN_VIABLE_NET_EDGE_BPS, min_viable_net_edge_bps
+from shared.utils.fee_tracker import refresh_all
 from strategies import (
     CrossExchangeStrategy,
     FundingRateArbStrategy,
@@ -41,7 +49,7 @@ logger = logging.getLogger("opportunity-engine")
 
 
 _EVAL_INTERVAL_S = float(os.environ.get("EVAL_INTERVAL_S", "1.0"))
-_PUBLISH_NET_EDGE_THRESHOLD = float(
+_PUBLISH_NET_EDGE_FLOOR = float(
     os.environ.get("PUBLISH_NET_EDGE_THRESHOLD_BPS", str(MIN_VIABLE_NET_EDGE_BPS))
 )
 
@@ -51,7 +59,8 @@ _status = EngineStatus(
     status="ok",
     config={
         "eval_interval_s": _EVAL_INTERVAL_S,
-        "publish_net_edge_threshold_bps": _PUBLISH_NET_EDGE_THRESHOLD,
+        "publish_net_edge_floor_bps": _PUBLISH_NET_EDGE_FLOOR,
+        "static_min_viable_net_edge_bps": MIN_VIABLE_NET_EDGE_BPS,
     },
 )
 _strategies: list[Strategy] = [
@@ -73,6 +82,11 @@ def _on_funding(rate: FundingRate) -> None:
     _maybe_evaluate()
 
 
+def _resolve_publish_threshold() -> float:
+    """Higher of the env-var floor and the Redis-backed dynamic value."""
+    return max(_PUBLISH_NET_EDGE_FLOOR, min_viable_net_edge_bps())
+
+
 def _maybe_evaluate() -> None:
     global _last_eval_at
     with _last_eval_lock:
@@ -82,6 +96,7 @@ def _maybe_evaluate() -> None:
         _last_eval_at = now
 
     publisher = get_publisher()
+    threshold = _resolve_publish_threshold()
     candidates = []
     for s in _strategies:
         try:
@@ -92,7 +107,7 @@ def _maybe_evaluate() -> None:
     published = 0
     for c in candidates:
         opportunity = score(c)
-        if opportunity.net_edge_bps < _PUBLISH_NET_EDGE_THRESHOLD:
+        if opportunity.net_edge_bps < threshold:
             continue
         publisher.publish(
             Topic.OPPORTUNITIES,
@@ -106,6 +121,7 @@ def _maybe_evaluate() -> None:
 
     with _status_lock:
         _status.last_evaluation_at = datetime.utcnow()
+        _status.last_publish_threshold_bps = threshold
         if published:
             _status.last_publish_at = datetime.utcnow()
             _status.opportunities_published_total += published
@@ -166,6 +182,36 @@ def evaluate_now() -> EngineStatus:
         _last_eval_at = 0.0
     _maybe_evaluate()
     return status()
+
+
+@app.post("/fee-tier/refresh")
+def fee_tier_refresh() -> dict:
+    """Pull 30-day volume per exchange from Redis, write the active tier + days
+    to next tier, and refresh the dynamic ``MIN_VIABLE_NET_EDGE_BPS`` value.
+
+    Intended to be hit by Cloud Scheduler every 24h. Returns a JSON summary
+    of the active tier per exchange so the dashboard can render progress.
+    """
+    redis_url = os.environ.get("REDIS_URL")
+    if not redis_url:
+        raise HTTPException(
+            status_code=503, detail="REDIS_URL unset — fee tier refresh unavailable"
+        )
+    from redis import Redis  # local import keeps test envs lightweight
+
+    redis = Redis.from_url(redis_url, decode_responses=True)
+    lookups = refresh_all(redis)
+    return {
+        "tiers": {
+            ex: {
+                "current_fee_bps": lk.current_fee_bps,
+                "current_tier_min_volume_usd": lk.current_tier_min_volume_usd,
+                "next_tier_min_volume_usd": lk.next_tier_min_volume_usd,
+                "next_tier_fee_bps": lk.next_tier_fee_bps,
+            }
+            for ex, lk in lookups.items()
+        }
+    }
 
 
 # Used by tests and the /evaluate-now endpoint.

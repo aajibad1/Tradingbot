@@ -4,9 +4,12 @@ Endpoints:
   GET  /healthz                      Cloud Run liveness (503 if kill switch tripped)
   GET  /state                        Current risk state snapshot
   GET  /status                       Alias of /state (canonical name in spec)
+  GET  /liquidations                 Liquidation-distance scan for all open perps
+  GET  /capital-validation           Capital sufficiency snapshot (informational)
   POST /evaluate                     Approve or reject an Opportunity
   POST /kill-switch/trigger          Trip the kill switch
-  POST /kill-switch/reset            Reset (requires KILL_SWITCH_RESET_TOKEN)
+  POST /kill-switch/reset            Reset (requires KILL_SWITCH_RESET_TOKEN +
+                                     capital >= MIN_VIABLE_CAPITAL_USD)
   POST /admin/reset                  Alias of /kill-switch/reset
 
 The evaluator is the choke point for every signal flowing downstream. If it
@@ -19,7 +22,9 @@ Evaluation order (canonical — see CLAUDE.md "risk-engine is the choke point"):
   3. Drawdown — a breach trips the kill switch SYNCHRONOUSLY inside this
      handler so the same request both reports the violation and locks down
      the system.
-  4. Exchange health (API latency on both legs).
+  4. Liquidation distance — same synchronous-kill behaviour for any open
+     position inside the CRITICAL band.
+  5. Exchange health (API latency on both legs).
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ from models import (
     KillSwitchResetRequest,
     KillSwitchTriggerRequest,
 )
+from rules.capital_validator import validate_capital
 from rules.drawdown_guard import DEFAULT_LIMITS, check_drawdown
 from rules.exchange_health import check_exchange_health
 from rules.kill_switch import (
@@ -42,6 +48,7 @@ from rules.kill_switch import (
     is_kill_switch_active,
     trigger_kill_switch as kill_switch_trigger,
 )
+from rules.liquidation_monitor import check_liquidations, scan as scan_liquidations
 from rules.position_limits import check_position_limits
 from state import get_redis, load_state
 
@@ -83,6 +90,53 @@ def get_status() -> dict:
     return get_state()
 
 
+@app.get("/liquidations")
+def get_liquidations() -> dict:
+    """Return the current liquidation-distance scan for all open perps.
+
+    Read-only — the kill-switch trigger only fires through /evaluate, so
+    operators can dashboard this endpoint without side-effects.
+    """
+    redis = get_redis()
+    checks = scan_liquidations(redis)
+    return {
+        "positions": [
+            {
+                "opportunity_id": c.opportunity_id,
+                "exchange": c.exchange,
+                "asset": c.asset,
+                "mark_price": c.mark_price,
+                "liquidation_price": c.liquidation_price,
+                "distance_pct": c.distance_pct,
+                "severity": c.severity,
+            }
+            for c in checks
+        ]
+    }
+
+
+@app.get("/capital-validation")
+def get_capital_validation() -> dict:
+    """Return the capital-validation snapshot.
+
+    Informational — does NOT block opportunities. The kill-switch reset
+    endpoint uses the same check to refuse reset under-capitalised systems.
+    """
+    redis = get_redis()
+    state = load_state(redis)
+    result = validate_capital(state.capital_usd)
+    return {
+        "passed": result.passed,
+        "capital_usd": result.capital_usd,
+        "monthly_infra_cost_usd": result.monthly_infra_cost_usd,
+        "expected_monthly_gross_usd": result.expected_monthly_gross_usd,
+        "expected_monthly_net_usd": result.expected_monthly_net_usd,
+        "min_viable_usd": result.min_viable_usd,
+        "recommended_usd": result.recommended_usd,
+        "message": result.message,
+    }
+
+
 @app.post("/evaluate", response_model=EvaluateResponse)
 def evaluate(req: EvaluateRequest) -> EvaluateResponse:
     redis = get_redis()
@@ -108,7 +162,17 @@ def evaluate(req: EvaluateRequest) -> EvaluateResponse:
         violations.append(drawdown_violation)
         kill_switch_trigger(redis, "risk-engine", drawdown_violation.message)
 
-    # Stage 4: exchange health (both legs must be responsive).
+    # Stage 4: liquidation distance on any open perp. Critical → kill switch.
+    liq_violations, liq_checks = check_liquidations(redis)
+    violations.extend(liq_violations)
+    critical_liqs = [c for c in liq_checks if c.severity == "critical"]
+    if critical_liqs:
+        # Use the first critical position for the kill reason — operators can
+        # see the rest in /liquidations.
+        c = critical_liqs[0]
+        kill_switch_trigger(redis, "risk-engine", c.message())
+
+    # Stage 5: exchange health (both legs must be responsive).
     venues = [req.opportunity.long_exchange, req.opportunity.short_exchange]
     violations.extend(
         check_exchange_health(redis, venues, DEFAULT_LIMITS["max_api_latency_ms"])
@@ -144,6 +208,11 @@ def trigger(req: KillSwitchTriggerRequest) -> dict:
 @app.post("/kill-switch/reset")
 def reset(req: KillSwitchResetRequest) -> dict:
     redis = get_redis()
+    # Capital sufficiency gate — never reset into a money-losing posture.
+    state_pre = load_state(redis)
+    capital = validate_capital(state_pre.capital_usd)
+    if not capital.passed:
+        raise HTTPException(status_code=409, detail=capital.message)
     try:
         state = kill_switch_reset(redis, req.auth_token, req.reset_by)
     except PermissionError as e:

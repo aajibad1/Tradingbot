@@ -2,8 +2,9 @@
 
 We deliberately avoid pulling fakeredis in as a test dep. The risk-engine only
 uses a small slice of redis-py (``get``, ``set``, ``delete``, ``scan_iter``,
-``pipeline``), so we ship a tiny in-process fake here and have every test
-monkeypatch :func:`state.get_redis` to return it.
+``pipeline``, plus ``hset``/``hgetall`` for the liquidation-monitor's
+``risk:positions:open`` hash), so we ship a tiny in-process fake here and
+have every test monkeypatch :func:`state.get_redis` to return it.
 
 This keeps the test image identical to the production image (no extra wheels)
 and means the unit tests run on a vanilla Python install.
@@ -44,6 +45,7 @@ class FakeRedis:
 
     def __init__(self) -> None:
         self._kv: dict[str, str] = {}
+        self._hashes: dict[str, dict[str, str]] = {}
 
     # -- core ops --------------------------------------------------------- #
     def get(self, key: str) -> str | None:
@@ -59,6 +61,9 @@ class FakeRedis:
             if k in self._kv:
                 del self._kv[k]
                 n += 1
+            if k in self._hashes:
+                del self._hashes[k]
+                n += 1
         return n
 
     def scan_iter(self, match: str = "*"):
@@ -71,9 +76,34 @@ class FakeRedis:
     def pipeline(self) -> _FakePipeline:
         return _FakePipeline(self)
 
+    # -- hash ops --------------------------------------------------------- #
+    def hset(self, key: str, field: str, value) -> int:
+        h = self._hashes.setdefault(key, {})
+        existed = field in h
+        h[field] = str(value)
+        return 0 if existed else 1
+
+    def hgetall(self, key: str) -> dict[str, str]:
+        return dict(self._hashes.get(key, {}))
+
+    def hget(self, key: str, field: str) -> str | None:
+        return self._hashes.get(key, {}).get(field)
+
+    def hdel(self, key: str, *fields: str) -> int:
+        h = self._hashes.get(key)
+        if h is None:
+            return 0
+        n = 0
+        for f in fields:
+            if f in h:
+                del h[f]
+                n += 1
+        return n
+
     # -- helpers for tests ----------------------------------------------- #
     def flushall(self) -> None:
         self._kv.clear()
+        self._hashes.clear()
 
 
 @pytest.fixture()

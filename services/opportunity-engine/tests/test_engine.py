@@ -142,15 +142,16 @@ def test_evaluate_now_resets_throttle(monkeypatch) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Per-strategy: above + below threshold                                       #
+# Per-strategy: above + below threshold (MIN_VIABLE_NET_EDGE_BPS = 50)        #
 # --------------------------------------------------------------------------- #
 
 
 def test_cross_exchange_above_threshold_is_viable() -> None:
     snap = MarketSnapshot()
     snap.update_tick(_tick("kraken", "BTC", 60_000.0, 60_010.0))
-    # ~80 bps gross spread, comfortably above (kraken 26 + crypto.com 7.5 + 4 slip + 3 buffer = ~40.5)
-    snap.update_tick(_tick("crypto.com", "BTC", 60_500.0, 60_510.0))
+    # ~165 bps gross. kraken 26 + crypto.com 7.5 + 4 slip + 3 buffer = 40.5
+    # → net ~125 bps, comfortably above the 50 bp viability bar.
+    snap.update_tick(_tick("crypto.com", "BTC", 61_000.0, 61_010.0))
 
     cands = list(CrossExchangeStrategy().evaluate(snap))
     assert cands, "expected at least one cross-exchange candidate"
@@ -160,27 +161,26 @@ def test_cross_exchange_above_threshold_is_viable() -> None:
 
 
 def test_cross_exchange_below_threshold_not_viable() -> None:
-    """Small gross spread → net_edge below MIN_VIABLE_NET_EDGE_BPS."""
+    """Modest gross spread that beats fees but still trails the 50-bp bar."""
     snap = MarketSnapshot()
     snap.update_tick(_tick("kraken", "BTC", 60_000.0, 60_010.0))
-    # ~12 bps gross (60_017 / 60_010 ≈ 12 bps after subtracting ask):
-    snap.update_tick(_tick("crypto.com", "BTC", 60_080.0, 60_090.0))
+    # ~65 bps gross (60_400 - 60_010) / 60_010, net ≈ 24 bps after fees+buffer
+    # → above the strategy's own 5-bp gate but well below MIN_VIABLE_NET_EDGE_BPS=50.
+    snap.update_tick(_tick("crypto.com", "BTC", 60_400.0, 60_410.0))
 
     cands = list(CrossExchangeStrategy().evaluate(snap))
-    if not cands:
-        # Below the strategy's own _MIN_GROSS_SPREAD_BPS — also acceptable.
-        return
+    assert cands, "candidate should be emitted; viability is checked downstream"
     opp = score(cands[0])
-    # Fees alone (kraken 26 + crypto.com 7.5 = 33.5) + buffer + slip would
-    # easily exceed a 12 bp spread.
     assert opp.net_edge_bps < MIN_VIABLE_NET_EDGE_BPS
+    assert opp.rejection_reason is not None
 
 
 def test_spot_perp_basis_above_threshold_is_viable() -> None:
     snap = MarketSnapshot()
     snap.update_tick(_tick("kraken", "BTC", 60_000.0, 60_010.0, instrument_type="spot"))
-    # 60 bps basis premium on the perp leg
-    snap.update_tick(_tick("hyperliquid", "BTC", 60_355.0, 60_365.0, instrument_type="perp"))
+    # ~165 bps basis premium. kraken 26 + hyperliquid 5 + 4 slip + 3 buffer = 38
+    # → net ~127 bps, well above 50.
+    snap.update_tick(_tick("hyperliquid", "BTC", 60_995.0, 61_005.0, instrument_type="perp"))
 
     cands = list(SpotPerpBasisStrategy().evaluate(snap))
     assert cands
@@ -192,7 +192,7 @@ def test_spot_perp_basis_above_threshold_is_viable() -> None:
 def test_spot_perp_basis_below_threshold_not_viable() -> None:
     snap = MarketSnapshot()
     snap.update_tick(_tick("kraken", "BTC", 60_000.0, 60_010.0, instrument_type="spot"))
-    # ~10 bps basis — below threshold once kraken + hyperliquid fees + buffer kick in
+    # ~10 bps basis — well below threshold once fees + buffer kick in
     snap.update_tick(_tick("hyperliquid", "BTC", 60_055.0, 60_065.0, instrument_type="perp"))
 
     cands = list(SpotPerpBasisStrategy().evaluate(snap))
@@ -205,8 +205,10 @@ def test_spot_perp_basis_below_threshold_not_viable() -> None:
 def test_funding_rate_arb_above_threshold_is_viable() -> None:
     snap = MarketSnapshot()
     snap.update_tick(_tick("kraken", "BTC", 60_000.0, 60_010.0))
-    # 30% APR / 1095 periods per year ≈ 27 bps per 8h period
-    snap.update_funding(_funding("hyperliquid", "BTC", rate=0.0027, apr_pct=30.0))
+    # rate 0.005 per 8h period = 50 bps of funding payment counted twice
+    # (gross_spread_bps = |funding_bps|, then funding_bps added again in net).
+    # kraken 26 + hyperliquid 5 + 4 slip + 3 buffer = 38 → net ~62 bps > 50.
+    snap.update_funding(_funding("hyperliquid", "BTC", rate=0.005, apr_pct=55.0))
 
     cands = list(FundingRateArbStrategy().evaluate(snap))
     assert cands
@@ -214,7 +216,6 @@ def test_funding_rate_arb_above_threshold_is_viable() -> None:
     assert opp.strategy == StrategyType.FUNDING_RATE_ARB
     assert opp.short_exchange == "hyperliquid"
     assert opp.long_exchange == "kraken"
-    # gross + funding clears kraken 26 + hyperliquid 5 + slip + buffer
     assert opp.net_edge_bps > MIN_VIABLE_NET_EDGE_BPS
 
 
@@ -316,5 +317,23 @@ def test_scorer_total_costs_match_fee_calculator() -> None:
     opp = score(cand)
     # 26 (kraken) + 7.5 (crypto.com)
     assert opp.trading_fees_bps == 33.5
-    # net = 50 - 33.5 - 4 - 3 = 9.5
+    # net = 50 - 33.5 - 4 - 3 = 9.5 (below the 50-bp viability bar)
     assert abs(opp.net_edge_bps - 9.5) < 1e-6
+    assert opp.rejection_reason is not None
+
+
+def test_scorer_marks_viable_above_threshold() -> None:
+    """A spread that beats the 50-bp net edge bar should not be flagged."""
+    cand = ScoredCandidate(
+        strategy=StrategyType.CROSS_EXCHANGE,
+        asset="BTC",
+        long_exchange="kraken",
+        short_exchange="crypto.com",
+        gross_spread_bps=120.0,
+        slippage_long_bps=2.0,
+        slippage_short_bps=2.0,
+    )
+    opp = score(cand)
+    # net = 120 - 33.5 - 4 - 3 = 79.5
+    assert opp.net_edge_bps > MIN_VIABLE_NET_EDGE_BPS
+    assert opp.rejection_reason is None

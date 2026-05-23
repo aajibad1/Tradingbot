@@ -35,6 +35,7 @@ from approval_gate import (
 )
 from hummingbot_client import HummingbotClient, HummingbotOrderRequest
 from shared.models.opportunity import Opportunity
+from spot_router import route_for_execution
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("execution-orchestrator")
@@ -150,19 +151,40 @@ async def slack_interaction(request: Request) -> dict[str, Any]:
 
 @app.post("/tick")
 def tick() -> dict[str, Any]:
-    """Drain approved opportunities to Hummingbot + sweep expired pending."""
+    """Drain approved opportunities to Hummingbot + sweep expired pending.
+
+    Each approved opportunity is routed through ``spot_router.route_for_execution``
+    so the long (spot) leg fails over to the fallback venue if the primary
+    spot exchange is unhealthy. Failovers are recorded in the response so
+    operators can see them in the tick result.
+    """
     expired = sweep_expired()
     submitted: list[str] = []
+    failovers: list[dict[str, str]] = []
     client = HummingbotClient()
+    redis = _redis()
     bot_id = os.environ.get("HUMMINGBOT_BOT_ID", "arb-funding-rate")
     for pending in drain_approved():
         try:
-            request = HummingbotOrderRequest.from_opportunity(bot_id, pending.opportunity)
+            decision = route_for_execution(redis, pending.opportunity)
+            if decision.failed_over:
+                failovers.append(
+                    {
+                        "opportunity_id": pending.opportunity_id,
+                        "reason": decision.reason or "",
+                    }
+                )
+            request = HummingbotOrderRequest.from_opportunity(bot_id, decision.opportunity)
             client.submit_order(request)
             submitted.append(pending.opportunity_id)
         except Exception:
             logger.exception("hummingbot submit failed id=%s", pending.opportunity_id)
-    return {"submitted": submitted, "expired": expired, "tick_at": datetime.utcnow().isoformat()}
+    return {
+        "submitted": submitted,
+        "failovers": failovers,
+        "expired": expired,
+        "tick_at": datetime.utcnow().isoformat(),
+    }
 
 
 @app.get("/pending")

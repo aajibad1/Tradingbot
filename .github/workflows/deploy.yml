@@ -26,6 +26,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Every service listed below has a Dockerfile checked in. The matrix
+        # is the canonical "what we deploy" list — keep it aligned with the
+        # services/ directory contents.
         service:
           - market-data
           - funding-rate-service
@@ -84,3 +87,32 @@ jobs:
       - name: apply
         working-directory: infra/terraform/environments/prod
         run: terraform apply -auto-approve tfplan
+
+  # ---------------------------------------------------------------------------
+  # Slack notification — runs after the deploy whether it succeeded or failed.
+  # Soft-fails if SLACK_WEBHOOK_URL is unset (the step prints a notice
+  # rather than failing the workflow).
+  # ---------------------------------------------------------------------------
+  notify:
+    needs: [build-and-push, terraform-apply-prod]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Post deploy status to Slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          BUILD_RESULT: ${{ needs.build-and-push.result }}
+          TF_RESULT: ${{ needs.terraform-apply-prod.result }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
+            echo "SLACK_WEBHOOK_URL not set — skipping notification."
+            exit 0
+          fi
+          STATUS="success"
+          if [ "$BUILD_RESULT" != "success" ] || [ "$TF_RESULT" != "success" ]; then
+            STATUS="failure"
+          fi
+          curl -sS -X POST -H 'Content-Type: application/json' \
+            --data "{\"text\":\"Deploy ${STATUS} (build=${BUILD_RESULT}, terraform=${TF_RESULT}) — ${SHA}\"}" \
+            "${SLACK_WEBHOOK_URL}"

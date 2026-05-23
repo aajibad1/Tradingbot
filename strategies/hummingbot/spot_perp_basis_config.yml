@@ -1,0 +1,55 @@
+# Hummingbot spot-perp basis strategy config.
+#
+# Captures the price gap between spot and perp on the same asset. Direction
+# is opportunity-defined: when perp trades at a premium we long spot + short
+# perp; when perp trades at a discount we flip.
+
+strategy: spot_perp_basis
+template_version: 1.0
+
+# ---- Identity ------------------------------------------------------------
+bot_id: arb-spot-perp-basis
+
+# ---- Markets -------------------------------------------------------------
+# Symbol lists are normalized to the connector's native format upstream by
+# shared/utils/exchange_normalizer.
+markets:
+  spot:
+    kraken:        ["BTC-USD", "ETH-USD", "SOL-USD", "AVAX-USD"]
+    coinbase:      ["BTC-USD", "ETH-USD", "SOL-USD", "AVAX-USD"]
+    crypto_com:    ["BTC-USDT", "ETH-USDT", "SOL-USDT"]
+  perp:
+    hyperliquid:   ["BTC-USD", "ETH-USD", "SOL-USD", "AVAX-USD"]
+    kraken:        ["BTC-PERP", "ETH-PERP"]
+    crypto_com:    ["BTC-USDT-PERP", "ETH-USDT-PERP"]
+
+# ---- Sizing --------------------------------------------------------------
+order_size_usd_default: 10000
+order_size_usd_max:     25000
+
+# ---- Execution -----------------------------------------------------------
+order_type: market
+slippage_tolerance_bps: 25
+max_open_positions:     5
+
+# ---- Hedging -------------------------------------------------------------
+# Spot-perp basis is delta-flat at entry but the basis can drift. Re-hedge
+# when net delta deviates by > $200 (≈ 2 bps on a $10K position).
+delta_rehedge_usd: 200
+hedge_window_seconds: 3
+
+# ---- Exit rules ----------------------------------------------------------
+exit_rules:
+  basis_collapse_pct: 0.50              # exit if basis < 50% of entry
+  max_hold_hours:     24                # hard exit at 24h regardless of basis
+  funding_flip_exit:  true              # exit if funding sign flips against us
+
+# ---- Risk integration ----------------------------------------------------
+risk_kill_switch_check:
+  redis_url_env: REDIS_URL
+  kill_switch_key: "risk:kill_switch:active"
+  active_value: "1"
+
+# ---- Observability -------------------------------------------------------
+log_level: INFO
+emit_fills_to_orchestrator: true

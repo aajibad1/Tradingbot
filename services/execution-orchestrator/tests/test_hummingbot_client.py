@@ -1,6 +1,12 @@
 from datetime import datetime
 
-from hummingbot_client import HummingbotOrderRequest
+from hummingbot_client import (
+    ARB_LEVERAGE,
+    HummingbotCloseRequest,
+    HummingbotOrderRequest,
+    ISOLATED_MARGIN_MODE,
+    perp_risk_params,
+)
 
 from shared.models.opportunity import Opportunity, StrategyType
 
@@ -42,3 +48,28 @@ def test_order_request_payload_round_trip() -> None:
     assert payload["strategy"] == "funding_rate_arb"
     assert payload["opportunity_id"] == "opp-123"
     assert payload["metadata"]["confidence_score"] == 0.85
+
+
+def test_open_order_uses_isolated_margin_and_1x_leverage() -> None:
+    """Margin policy: every open order is isolated + 1x leverage + not reduceOnly."""
+    payload = HummingbotOrderRequest.from_opportunity("bot-1", _opportunity()).to_payload()
+    assert payload["risk_params"]["marginMode"] == ISOLATED_MARGIN_MODE == "isolated"
+    assert payload["risk_params"]["leverage"] == ARB_LEVERAGE == 1
+    assert payload["risk_params"]["reduceOnly"] is False
+
+
+def test_close_request_is_reduce_only() -> None:
+    """Close requests must carry reduceOnly=True so a misroute can't open exposure."""
+    close = HummingbotCloseRequest(bot_id="bot-1", opportunity_id="opp-123")
+    payload = close.to_payload()
+    assert payload["opportunity_id"] == "opp-123"
+    assert payload["risk_params"]["marginMode"] == "isolated"
+    assert payload["risk_params"]["leverage"] == 1
+    assert payload["risk_params"]["reduceOnly"] is True
+
+
+def test_perp_risk_params_default_is_open_position() -> None:
+    p = perp_risk_params()
+    assert p == {"marginMode": "isolated", "leverage": 1, "reduceOnly": False}
+    p_close = perp_risk_params(reduce_only=True)
+    assert p_close["reduceOnly"] is True

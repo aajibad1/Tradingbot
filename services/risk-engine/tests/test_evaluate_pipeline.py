@@ -1,14 +1,16 @@
 """End-to-end tests of the /evaluate pipeline.
 
-These exercise the four-stage flow defined in ``main.py``:
+These exercise the five-stage flow defined in ``main.py``:
   1. Kill switch — short-circuits.
   2. Position limits.
   3. Drawdown — trips the kill switch synchronously inside the handler.
-  4. Exchange health.
+  4. Liquidation distance.
+  5. Exchange health.
 """
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 import pytest
@@ -22,16 +24,20 @@ def client(app) -> TestClient:
     return TestClient(app, raise_server_exceptions=False)
 
 
-def _opp(net_edge_bps: float = 15.0, size_usd: float = 1_000.0) -> dict:
+# 75-bp net is comfortably above the 50-bp MIN_NET_EDGE bar.
+_DEFAULT_NET_EDGE_BPS = 75.0
+
+
+def _opp(net_edge_bps: float = _DEFAULT_NET_EDGE_BPS, size_usd: float = 1_000.0) -> dict:
     return Opportunity(
         id="o-pipeline",
         strategy=StrategyType.FUNDING_RATE_ARB,
         asset="BTC",
         long_exchange="kraken",
         short_exchange="hyperliquid",
-        gross_spread_bps=20.0,
-        trading_fees_bps=4.0,
-        slippage_estimate_bps=1.0,
+        gross_spread_bps=120.0,
+        trading_fees_bps=31.0,
+        slippage_estimate_bps=4.0,
         funding_rate_annualized_pct=12.0,
         net_edge_bps=net_edge_bps,
         confidence_score=0.85,
@@ -155,3 +161,74 @@ def test_admin_reset_requires_correct_token(client, fake_redis, monkeypatch) -> 
     assert ok.status_code == 200
     assert ok.json()["active"] is False
     assert fake_redis.get("risk:kill_switch:active") is None
+
+
+def test_liquidation_warning_band_records_violation(client, fake_redis) -> None:
+    """A position 10% from liquidation should add a warn-level violation but
+    NOT trip the kill switch."""
+    _seed_health(fake_redis)
+    fake_redis.hset(
+        "risk:positions:open",
+        "opp-1",
+        json.dumps(
+            {
+                "opportunity_id": "opp-1",
+                "exchange": "hyperliquid",
+                "asset": "BTC",
+                "mark_price": 60_000.0,
+                "liquidation_price": 54_000.0,  # 10% away → warn band
+            }
+        ),
+    )
+    resp = client.post("/evaluate", json={"opportunity": _opp()})
+    body = resp.json()
+    assert resp.status_code == 200
+    assert body["approved"] is False  # any violation blocks approval
+    assert any("liquidation" in v["message"] for v in body["violations"])
+    assert body["kill_switch_active"] is False
+
+
+def test_liquidation_critical_band_trips_kill_switch(client, fake_redis) -> None:
+    """A position inside the 5% critical band must trip the kill switch."""
+    _seed_health(fake_redis)
+    fake_redis.hset(
+        "risk:positions:open",
+        "opp-2",
+        json.dumps(
+            {
+                "opportunity_id": "opp-2",
+                "exchange": "hyperliquid",
+                "asset": "BTC",
+                "mark_price": 60_000.0,
+                "liquidation_price": 58_500.0,  # 2.5% away → critical
+            }
+        ),
+    )
+    resp = client.post("/evaluate", json={"opportunity": _opp()})
+    body = resp.json()
+    assert resp.status_code == 200
+    assert body["kill_switch_active"] is True
+    assert fake_redis.get("risk:kill_switch:active") == "1"
+
+
+def test_liquidations_endpoint_returns_scan(client, fake_redis) -> None:
+    fake_redis.hset(
+        "risk:positions:open",
+        "opp-3",
+        json.dumps(
+            {
+                "opportunity_id": "opp-3",
+                "exchange": "hyperliquid",
+                "asset": "ETH",
+                "mark_price": 3_000.0,
+                "liquidation_price": 2_700.0,  # 10% → warn
+            }
+        ),
+    )
+    resp = client.get("/liquidations")
+    body = resp.json()
+    assert resp.status_code == 200
+    assert len(body["positions"]) == 1
+    pos = body["positions"][0]
+    assert pos["opportunity_id"] == "opp-3"
+    assert pos["severity"] == "warn"
