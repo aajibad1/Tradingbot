@@ -30,9 +30,11 @@ jobs:
           filters: |
             infra:
               - 'infra/**'
+              - '.github/workflows/**'
             python:
               - 'services/**'
               - 'shared/**'
+              - '.github/workflows/**'
 
   # ---------------------------------------------------------------------------
   # Python lint — ruff
