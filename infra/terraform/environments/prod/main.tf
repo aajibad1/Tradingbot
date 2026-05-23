@@ -45,7 +45,14 @@ variable "region" {
 }
 
 variable "image_tag" {
-  type = string
+  description = <<-EOD
+    Docker image tag to deploy to every Cloud Run service. CI overrides this
+    with the git SHA from the build-and-push job. Defaults to "latest" so
+    manual plans/applies and ad-hoc rollbacks don't have to hand-pick a SHA;
+    the `latest` tag is set on every successful CI build.
+  EOD
+  type        = string
+  default     = "latest"
 }
 
 output "cloud_run_service_urls" {
