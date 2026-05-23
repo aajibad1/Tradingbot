@@ -17,6 +17,7 @@ from rules.liquidation_monitor import (
     scan as scan_liquidations,
 )
 from rules.position_limits import check_position_limits
+from rules.sentiment_gate import check_sentiment
 
 __all__ = [
     "ALERT_THRESHOLD_PCT",
@@ -27,6 +28,7 @@ __all__ = [
     "check_exchange_health",
     "check_liquidations",
     "check_position_limits",
+    "check_sentiment",
     "clear_kill_switch",
     "is_kill_switch_active",
     "scan_liquidations",

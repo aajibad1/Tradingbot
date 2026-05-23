@@ -75,6 +75,7 @@ class PerplexityClient(SentimentClient):
         url: str = _PERPLEXITY_URL,
         model: str = _MODEL,
         timeout_s: float = 30.0,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.api_key = (
             api_key
@@ -89,6 +90,7 @@ class PerplexityClient(SentimentClient):
         self.url = url
         self.model = model
         self.timeout_s = timeout_s
+        self._transport = transport
 
     async def fetch(self) -> PerplexityResult:
         headers = {
@@ -103,7 +105,9 @@ class PerplexityClient(SentimentClient):
             ],
             "temperature": 0.0,
         }
-        async with httpx.AsyncClient(timeout=self.timeout_s) as client:
+        async with httpx.AsyncClient(
+            timeout=self.timeout_s, transport=self._transport
+        ) as client:
             response = await client.post(self.url, json=body, headers=headers)
             response.raise_for_status()
             payload = response.json()

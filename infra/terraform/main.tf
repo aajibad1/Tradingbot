@@ -142,6 +142,16 @@ locals {
       subscribe_subs = []
       cpu_idle       = false
     }
+    # Sentiment-service — Cloud Scheduler hits POST /sentiment/refresh every
+    # 4h. The signal lives in Redis (sentiment:* namespace; sentiment-service
+    # is the sole writer). No Pub/Sub topic yet — risk-engine reads Redis
+    # synchronously in /evaluate.
+    "sentiment-service" = {
+      secrets        = ["PERPLEXITY_API_KEY", "CRYPTOPANIC_API_KEY"]
+      publish_topics = ["arb-audit-log"]
+      subscribe_subs = []
+      cpu_idle       = true
+    }
   }
 
   # Flat list of every distinct secret ID used anywhere in the system.
@@ -166,6 +176,7 @@ resource "google_project_service" "required" {
     "logging.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     "iam.googleapis.com",
+    "cloudscheduler.googleapis.com",
   ])
 
   project            = var.project_id
@@ -302,6 +313,50 @@ module "cloud_run" {
     module.secrets,
     google_artifact_registry_repository.crypto_arb,
   ]
+}
+
+# ---------------------------------------------------------------------------
+# Cloud Scheduler — hits sentiment-service every 4 hours.
+# Uses an OIDC-authenticated invocation so the sentiment-service can stay
+# --no-allow-unauthenticated.
+# ---------------------------------------------------------------------------
+resource "google_service_account" "sentiment_scheduler" {
+  account_id   = "sentiment-scheduler-${var.environment}"
+  display_name = "Cloud Scheduler invoker for sentiment-service"
+  project      = var.project_id
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_cloud_run_service_iam_member" "sentiment_invoker" {
+  project  = var.project_id
+  location = var.region
+  service  = "sentiment-service"
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.sentiment_scheduler.email}"
+
+  depends_on = [module.cloud_run]
+}
+
+resource "google_cloud_scheduler_job" "sentiment_refresh" {
+  name        = "sentiment-refresh-${var.environment}"
+  description = "Refresh market-sentiment signal in Redis every 4 hours."
+  schedule    = "0 */4 * * *"
+  time_zone   = "Etc/UTC"
+  project     = var.project_id
+  region      = var.region
+
+  http_target {
+    http_method = "POST"
+    uri         = "${module.cloud_run["sentiment-service"].service_url}/sentiment/refresh"
+
+    oidc_token {
+      service_account_email = google_service_account.sentiment_scheduler.email
+      audience              = module.cloud_run["sentiment-service"].service_url
+    }
+  }
+
+  depends_on = [google_cloud_run_service_iam_member.sentiment_invoker]
 }
 
 # ---------------------------------------------------------------------------

@@ -24,7 +24,8 @@ Evaluation order (canonical — see CLAUDE.md "risk-engine is the choke point"):
      the system.
   4. Liquidation distance — same synchronous-kill behaviour for any open
      position inside the CRITICAL band.
-  5. Exchange health (API latency on both legs).
+  5. Sentiment gate — fail-OPEN soft gate; never trips the kill switch.
+  6. Exchange health (API latency on both legs).
 """
 
 from __future__ import annotations
@@ -50,6 +51,7 @@ from rules.kill_switch import (
 )
 from rules.liquidation_monitor import check_liquidations, scan as scan_liquidations
 from rules.position_limits import check_position_limits
+from rules.sentiment_gate import check_sentiment
 from state import get_redis, load_state
 
 logging.basicConfig(
@@ -172,7 +174,12 @@ def evaluate(req: EvaluateRequest) -> EvaluateResponse:
         c = critical_liqs[0]
         kill_switch_trigger(redis, "risk-engine", c.message())
 
-    # Stage 5: exchange health (both legs must be responsive).
+    # Stage 5: sentiment gate (fail-open soft gate; never trips kill switch).
+    # The sentiment-service is the sole writer of sentiment:*. Missing or
+    # stale data results in [] here, which intentionally does NOT block.
+    violations.extend(check_sentiment(redis))
+
+    # Stage 6: exchange health (both legs must be responsive).
     venues = [req.opportunity.long_exchange, req.opportunity.short_exchange]
     violations.extend(
         check_exchange_health(redis, venues, DEFAULT_LIMITS["max_api_latency_ms"])
