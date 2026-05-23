@@ -10,7 +10,8 @@ Subscribes to:
 Exposes:
   GET /healthz
   GET /status
-  GET /tax-export?year=YYYY     — IRS Form 8949 CSV download (live closed trades only)
+  GET /tax-export?year=YYYY                  — IRS Form 8949 CSV (capital gains)
+  GET /tax-export/funding-income?year=YYYY   — Funding payments as ordinary income
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ import writer
 from shared.models.funding_rate import FundingRate
 from shared.models.opportunity import Opportunity
 from shared.models.trade import Trade
-from tax_export import export_year
+from tax_export import export_funding_income_year, export_year
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("trade-ledger")
@@ -148,7 +149,7 @@ def status() -> dict[str, str | int]:
 
 @app.get("/tax-export")
 def tax_export(year: int = Query(ge=2020, le=2100)) -> Response:
-    """Return a Form 8949 CSV for the requested tax year."""
+    """Return a Form 8949 CSV for the requested tax year (capital gains)."""
     try:
         csv_body = export_year(year)
     except Exception as e:
@@ -158,5 +159,26 @@ def tax_export(year: int = Query(ge=2020, le=2100)) -> Response:
         media_type="text/csv",
         headers={
             "Content-Disposition": f'attachment; filename="form_8949_{year}.csv"'
+        },
+    )
+
+
+@app.get("/tax-export/funding-income")
+def tax_export_funding_income(year: int = Query(ge=2020, le=2100)) -> Response:
+    """Return a CSV of funding payments collected during ``year``.
+
+    Funding is taxed as ordinary income (Schedule 1, line 8z "Other
+    earned income"). Each row is one closed live trade's net funding
+    receipts; aggregate downstream in your tax software.
+    """
+    try:
+        csv_body = export_funding_income_year(year)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return Response(
+        content=csv_body,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="funding_income_{year}.csv"'
         },
     )
