@@ -56,6 +56,13 @@ resource "google_cloud_run_v2_service" "svc" {
   ingress  = "INGRESS_TRAFFIC_ALL"
   labels   = var.labels
 
+  # Cloud Run v2 defaults this to true. Our services hold no state (Redis +
+  # BigQuery are the systems of record), so blocking replacement on every
+  # config change adds friction without protecting data. Set false explicitly
+  # so Terraform can destroy/recreate when image_tag or scaling changes
+  # require it.
+  deletion_protection = false
+
   template {
     service_account       = google_service_account.svc.email
     execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
