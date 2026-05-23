@@ -334,14 +334,14 @@ canvas{max-height:180px}
 
 <script>
 // ── Backend Configuration ────────────────────────────────────────────────
-const API_BASE = {
-  riskEngine: 'http://localhost:8080',
-  paperTrader: 'http://localhost:8081',
-  tradeLedger: 'http://localhost:8082',
-  opportunityEngine: 'http://localhost:8083',
-  fundingRateService: 'http://localhost:8084',
-  aiOpsAgent: 'http://localhost:8085'
-};
+// Single aggregator endpoint. When served from the dashboard-api Cloud Run
+// service, this is same-origin (no CORS). For local dev, override via
+// ?api=http://localhost:8086 query string.
+const API_BASE = new URLSearchParams(window.location.search).get('api') || '';
+
+// Most recent /api/summary response, kept in module scope so each render
+// function can read from it without re-fetching.
+let latestSummary = null;
 
 // ── State ────────────────────────────────────────────────────────────────
 const state = {
@@ -431,29 +431,43 @@ const pnlChart = new Chart(ctx, {
 
 // ── Update Risk State ─────────────────────────────────────────────────────
 async function updateRiskState() {
-  const data = await fetchSafe(`${API_BASE.riskEngine}/status`);
+  const data = latestSummary;
   if (!data) {
-    document.getElementById('riskPanelBody').innerHTML = '<div class="service-unavailable">Risk engine unavailable</div>';
+    document.getElementById('systemStatus').className = 'status-pill halted';
+    document.getElementById('statusLabel').textContent = 'BACKEND UNAVAILABLE';
     return;
   }
   state.riskState = data;
   state.services.riskEngine = true;
 
-  // Update kill switch status
   if (data.kill_switch_active) {
     document.getElementById('systemStatus').className = 'status-pill halted';
     document.getElementById('statusLabel').textContent = 'KILL SWITCH ACTIVE';
     state.killed = true;
   } else {
-    document.getElementById('systemStatus').className = 'status-pill paper';
-    document.getElementById('statusLabel').textContent = 'PAPER TRADING';
+    document.getElementById('systemStatus').className = `status-pill ${data.mode === 'live' ? 'live' : 'paper'}`;
+    document.getElementById('statusLabel').textContent = (data.mode || 'paper').toUpperCase().replace('_', ' ') + ' TRADING';
     state.killed = false;
   }
 
-  // Update risk bars (placeholder logic — adapt to actual RiskState schema)
-  const drawdownPct = (data.daily_drawdown || 0) * 100;
-  updateRiskBar('drawdown', drawdownPct, 1.0);
-  // Exchange exposures would come from position data
+  // Render every risk bar returned by the API. The container `riskPanelBody`
+  // gets rebuilt each refresh so the bar count can vary as exposures appear.
+  const panel = document.getElementById('riskPanelBody');
+  if (panel && Array.isArray(data.risk_bars)) {
+    panel.innerHTML = data.risk_bars.map(bar => {
+      const pct = bar.limit_pct > 0 ? Math.min(100, (bar.current_pct / bar.limit_pct) * 100) : 0;
+      const cls = pct > 80 ? 'danger' : pct > 50 ? 'warn' : 'safe';
+      return `
+        <div class="risk-item">
+          <div class="risk-label-row">
+            <span>${bar.label}</span>
+            <span style="font-family:var(--font-mono);font-size:11px">${bar.current_pct.toFixed(1)}% / ${bar.limit_pct.toFixed(1)}%</span>
+          </div>
+          <div class="risk-bar-track"><div class="risk-bar-fill ${cls}" style="width:${pct}%"></div></div>
+        </div>
+      `;
+    }).join('');
+  }
 }
 
 function updateRiskBar(id, current, limit) {
@@ -468,36 +482,31 @@ function updateRiskBar(id, current, limit) {
 
 // ── Update Opportunities ──────────────────────────────────────────────────
 async function updateOpportunities() {
-  // Placeholder: opportunityEngine would expose /opportunities endpoint
-  // For now, show mock data if backend unavailable
-  const mockOpps = [
-    {strategy: 'funding', asset: 'BTC', long: 'Kraken', short: 'HL', net: 12.4, persist: '6h 20m'},
-    {strategy: 'basis', asset: 'ETH', long: 'Coinbase', short: 'HL', net: 9.1, persist: '2h 45m'},
-    {strategy: 'cross', asset: 'SOL', long: 'Coinbase', short: 'Kraken', net: 7.8, persist: '0h 35m'},
-    {strategy: 'funding', asset: 'SOL', long: 'Crypto.com', short: 'HL', net: 15.2, persist: '11h 10m'},
-    {strategy: 'basis', asset: 'AVAX', long: 'Kraken', short: 'HL', net: 6.2, persist: '1h 05m'}
-  ];
-
   const tbody = document.getElementById('oppTableBody');
-  const viable = mockOpps.filter(o => o.net >= 8);
-  document.getElementById('oppCount').textContent = `${viable.length} viable`;
-  document.getElementById('liveOpps').textContent = viable.length;
+  const opps = (latestSummary && latestSummary.opportunities) || [];
 
-  if (mockOpps.length) {
-    const best = mockOpps.reduce((a, b) => b.net > a.net ? b : a);
-    document.getElementById('bestSpread').textContent = `${best.net} bps`;
-    document.getElementById('bestSpreadPair').textContent = `${best.asset} ${best.long}→${best.short}`;
+  const viable = opps.filter(o => o.net_edge_bps >= 8);
+  document.getElementById('oppCount').textContent = `${viable.length} viable`;
+
+  if (!opps.length) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--color-text-faint);padding:24px;font-size:11px">No opportunities in the last hour</td></tr>`;
+    return;
   }
 
-  tbody.innerHTML = mockOpps.map(o => {
-    const edgeClass = o.net >= 12 ? 'high' : o.net >= 8 ? 'mid' : 'low';
-    const stratBadge = `<span class="strategy-badge ${o.strategy}">${o.strategy.toUpperCase()}</span>`;
-    const viableFlag = o.net < 8 ? 'opacity:0.4' : '';
-    return `<tr style="${viableFlag}">
+  // Strategy badge class mapping — match what the CSS expects
+  const stratClass = {funding_rate_arb: 'funding', spot_perp_basis: 'basis', cross_exchange: 'cross', triangular: 'cross'};
+
+  tbody.innerHTML = opps.map(o => {
+    const edgeClass = o.net_edge_bps >= 12 ? 'high' : o.net_edge_bps >= 8 ? 'mid' : 'low';
+    const sCls = stratClass[o.strategy] || 'cross';
+    const sLabel = o.strategy.replace('_arb', '').replace('_perp_basis', '').replace('_exchange', '').toUpperCase();
+    const stratBadge = `<span class="strategy-badge ${sCls}">${sLabel}</span>`;
+    const dim = o.net_edge_bps < 8 ? 'opacity:0.4' : '';
+    return `<tr style="${dim}">
       <td>${stratBadge}</td>
       <td style="font-family:var(--font-mono);font-weight:600">${o.asset}</td>
-      <td style="font-size:11px;color:var(--color-text-muted)">${o.long} → ${o.short}</td>
-      <td class="opp-edge ${edgeClass}">${o.net} bps</td>
+      <td style="font-size:11px;color:var(--color-text-muted)">${o.long_exchange} → ${o.short_exchange}</td>
+      <td class="opp-edge ${edgeClass}">${o.net_edge_bps.toFixed(1)} bps</td>
       <td style="font-family:var(--font-mono);font-size:11px;color:var(--color-text-faint)">${o.persist}</td>
     </tr>`;
   }).join('');
@@ -550,66 +559,68 @@ async function updateFundingRates() {
 
 // ── Update PnL Chart ──────────────────────────────────────────────────────
 async function updatePnLChart() {
-  const data = await fetchSafe(`${API_BASE.tradeLedger}/pnl/30d`);
-  if (data && data.series) {
-    pnlChart.data.datasets[0].data = data.series;
+  const data = latestSummary;
+  if (!data) return;
+  const series = (data.pnl_history || []).map(p => p.pnl);
+  const labels = (data.pnl_history || []).map(p => p.d);
+  if (series.length) {
+    pnlChart.data.datasets[0].data = series;
+    pnlChart.data.labels = labels;
     pnlChart.update();
-    state.services.tradeLedger = true;
-
-    const totalPnl = data.series[data.series.length - 1] || 0;
-    document.getElementById('totalPnl').textContent = totalPnl >= 0 ? `+$${totalPnl.toFixed(2)}` : `-$${Math.abs(totalPnl).toFixed(2)}`;
-    if (data.sharpe) {
-      document.getElementById('sharpeRatio').textContent = `${data.sharpe.toFixed(2)}`;
-    }
-  } else {
-    // Use mock data
-    const paperPnl = [0, 12, 8, 25, 18, 40, 35, 62, 58, 80, 75, 95, 110, 88, 105, 130, 118, 142, 160, 155, 178, 195, 210, 205, 228, 240, 255, 248, 270, 285];
-    pnlChart.data.datasets[0].data = paperPnl;
-    pnlChart.update();
-    document.getElementById('totalPnl').textContent = '+$285.40';
-    document.getElementById('sharpeRatio').textContent = '1.84';
   }
+  state.services.tradeLedger = true;
+  const totalPnl = data.kpis && typeof data.kpis.cumulative_pnl_usd === 'number' ? data.kpis.cumulative_pnl_usd : 0;
+  document.getElementById('totalPnl').textContent = totalPnl >= 0 ? `+$${totalPnl.toFixed(2)}` : `-$${Math.abs(totalPnl).toFixed(2)}`;
+  const sharpe = data.kpis && data.kpis.sharpe_30d;
+  document.getElementById('sharpeRatio').textContent = (sharpe != null) ? `Sharpe: ${sharpe.toFixed(2)}` : 'Sharpe: —';
 }
 
 // ── Update Daily KPIs ─────────────────────────────────────────────────────
 async function updateDailyKPIs() {
-  const data = await fetchSafe(`${API_BASE.tradeLedger}/pnl/daily`);
-  if (data) {
-    const dailyPnl = data.pnl || 0;
-    document.getElementById('dailyPnl').textContent = dailyPnl >= 0 ? `+$${dailyPnl.toFixed(2)}` : `-$${Math.abs(dailyPnl).toFixed(2)}`;
-    document.getElementById('dailyPnl').className = `kpi-value ${dailyPnl >= 0 ? 'positive' : 'negative'}`;
-    document.getElementById('dailyPnlSub').textContent = `${data.trade_count || 0} trades today`;
+  const data = latestSummary;
+  if (!data || !data.kpis) {
+    document.getElementById('dailyPnl').textContent = '—';
+    document.getElementById('dailyPnlSub').textContent = 'backend unavailable';
+    return;
+  }
+  const k = data.kpis;
+  const dailyPnl = k.daily_pnl_usd || 0;
+  document.getElementById('dailyPnl').textContent = dailyPnl >= 0 ? `+$${dailyPnl.toFixed(2)}` : `-$${Math.abs(dailyPnl).toFixed(2)}`;
+  document.getElementById('dailyPnl').className = `kpi-value ${dailyPnl >= 0 ? 'positive' : 'negative'}`;
+  document.getElementById('dailyPnlSub').textContent = `${k.trades_today || 0} trades today`;
+
+  document.getElementById('openPositions').textContent = k.open_positions || 0;
+  document.getElementById('liveOpps').textContent = k.live_opportunities || 0;
+  if (k.best_spread_bps != null) {
+    document.getElementById('bestSpread').textContent = `${k.best_spread_bps.toFixed(1)} bps`;
+    document.getElementById('bestSpreadPair').textContent = k.best_spread_pair || '—';
   } else {
-    document.getElementById('dailyPnl').textContent = '+$285.40';
-    document.getElementById('dailyPnlSub').textContent = '14 trades today';
+    document.getElementById('bestSpread').textContent = '—';
+    document.getElementById('bestSpreadPair').textContent = '—';
   }
 }
 
 // ── Update Audit Log ──────────────────────────────────────────────────────
 async function updateAuditLog() {
-  // Placeholder: would poll an /events endpoint
-  const mockLogs = [
-    {time: '17:42:08', type: 'ok', event: 'Opportunity detected: BTC funding-rate arb +12.4 bps (Kraken→HL)'},
-    {time: '17:41:55', type: 'info', event: 'Funding rate update: SOL/HL +0.015% (8h period)'},
-    {time: '17:40:30', type: 'ok', event: 'Paper trade closed: ETH basis +$18.40 net PnL'},
-    {time: '17:38:12', type: 'info', event: 'Market data: all 4 exchanges connected, avg latency 94ms'},
-    {time: '17:35:00', type: 'ok', event: 'AI Ops report generated: 2 viable opportunities flagged'},
-    {time: '17:30:00', type: 'info', event: 'Risk engine heartbeat: all limits within bounds'},
-    {time: '17:22:41', type: 'warn', event: 'Slippage spike detected: SOL/Coinbase +8 bps vs model — opportunity skipped'},
-    {time: '17:18:03', type: 'ok', event: 'Paper trade opened: BTC funding-rate arb $10,000 (Kraken long / HL short)'},
-    {time: '17:00:00', type: 'info', event: 'System checkpoint: 0 kill-switch events today'}
-  ];
-
-  state.logs = mockLogs;
+  const logs = (latestSummary && latestSummary.audit_log) || [];
+  state.logs = logs;
   const container = document.getElementById('auditLog');
-  document.getElementById('logCount').textContent = `${mockLogs.length} events`;
-  container.innerHTML = mockLogs.slice(0, 50).map(l => `
-    <div class="log-item">
-      <span class="log-time">${l.time}</span>
-      <span class="log-type ${l.type}">${l.type.toUpperCase()}</span>
-      <span class="log-event">${l.event}</span>
-    </div>
-  `).join('');
+  document.getElementById('logCount').textContent = `${logs.length} events`;
+  if (!logs.length) {
+    container.innerHTML = `<div style="color:var(--color-text-faint);padding:12px;font-size:11px;text-align:center">No events in the last 6h</div>`;
+    return;
+  }
+  container.innerHTML = logs.slice(0, 50).map(l => {
+    // Map BQ severity values to the existing CSS classes
+    const cls = l.type === 'critical' ? 'warn' : l.type === 'warn' ? 'warn' : l.type === 'ok' ? 'ok' : 'info';
+    return `
+      <div class="log-item">
+        <span class="log-time">${l.time}</span>
+        <span class="log-type ${cls}">${(l.type || 'info').toUpperCase()}</span>
+        <span class="log-event">${l.event}</span>
+      </div>
+    `;
+  }).join('');
 }
 
 // ── Kill Switch ───────────────────────────────────────────────────────────
@@ -671,6 +682,11 @@ async function resetKillSwitch() {
 
 // ── Main Polling Loop ─────────────────────────────────────────────────────
 async function refreshDashboard() {
+  // Single round-trip: dashboard-api aggregates everything in /api/summary.
+  latestSummary = await fetchSafe(`${API_BASE}/api/summary`);
+
+  // Each panel reads from the cached latestSummary — no fan-out, no CORS,
+  // a single auth surface, and either all panels update or none do.
   await Promise.all([
     updateRiskState(),
     updateOpportunities(),
