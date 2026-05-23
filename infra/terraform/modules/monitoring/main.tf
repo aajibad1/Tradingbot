@@ -42,6 +42,39 @@ locals {
 }
 
 # ---------------------------------------------------------------------------
+# Custom metric descriptors — declared ahead of any data write so alert
+# policies that reference them can be created in the same apply.
+# Once the runtime services start emitting these metrics, GCP keeps the
+# descriptor we created here (declarative wins) and starts populating
+# time series.
+# ---------------------------------------------------------------------------
+resource "google_monitoring_metric_descriptor" "exchange_latency_ms" {
+  project      = var.project_id
+  type         = "custom.googleapis.com/arb/exchange_latency_ms"
+  metric_kind  = "GAUGE"
+  value_type   = "DOUBLE"
+  unit         = "ms"
+  display_name = "Exchange API latency (ms)"
+  description  = "Round-trip latency to each exchange's REST endpoint, emitted by market-data service."
+
+  labels {
+    key         = "exchange"
+    value_type  = "STRING"
+    description = "Exchange identifier (kraken, hyperliquid, ...)"
+  }
+}
+
+resource "google_monitoring_metric_descriptor" "daily_loss_pct" {
+  project      = var.project_id
+  type         = "custom.googleapis.com/arb/daily_loss_pct"
+  metric_kind  = "GAUGE"
+  value_type   = "DOUBLE"
+  unit         = "1"
+  display_name = "Daily loss fraction"
+  description  = "Realised + unrealised PnL today as a fraction of capital. Risk-engine breach threshold is configured per environment."
+}
+
+# ---------------------------------------------------------------------------
 # Log-based metric: kill switch activations
 # ---------------------------------------------------------------------------
 resource "google_logging_metric" "kill_switch" {
@@ -173,6 +206,9 @@ resource "google_monitoring_alert_policy" "exchange_latency" {
   alert_strategy {
     auto_close = "1800s"
   }
+
+  # Pre-created descriptor must exist before the alert references it.
+  depends_on = [google_monitoring_metric_descriptor.exchange_latency_ms]
 }
 
 # ---------------------------------------------------------------------------
@@ -202,4 +238,7 @@ resource "google_monitoring_alert_policy" "daily_loss" {
   alert_strategy {
     auto_close = "86400s"
   }
+
+  # Pre-created descriptor must exist before the alert references it.
+  depends_on = [google_monitoring_metric_descriptor.daily_loss_pct]
 }
