@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import spot_router
 from spot_router import (
     FALLBACK_SPOT_EXCHANGE,
     PRIMARY_SPOT_EXCHANGE,
