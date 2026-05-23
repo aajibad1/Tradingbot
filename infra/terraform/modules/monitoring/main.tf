@@ -181,6 +181,7 @@ resource "google_monitoring_alert_policy" "kill_switch" {
 # Alert: Exchange API latency (custom metric written by market-data service)
 # ---------------------------------------------------------------------------
 resource "google_monitoring_alert_policy" "exchange_latency" {
+  count        = var.enable_custom_metric_alerts ? 1 : 0
   project      = var.project_id
   display_name = "Exchange API latency > ${var.exchange_latency_threshold_ms}ms (${var.environment})"
   combiner     = "OR"
@@ -215,6 +216,7 @@ resource "google_monitoring_alert_policy" "exchange_latency" {
 # Alert: Daily loss > threshold (custom metric written by risk-engine)
 # ---------------------------------------------------------------------------
 resource "google_monitoring_alert_policy" "daily_loss" {
+  count        = var.enable_custom_metric_alerts ? 1 : 0
   project      = var.project_id
   display_name = "Daily loss > ${var.daily_loss_threshold_pct * 100}% (${var.environment})"
   combiner     = "OR"

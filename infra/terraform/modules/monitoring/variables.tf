@@ -24,6 +24,19 @@ variable "slack_webhook_secret_id" {
   type        = string
 }
 
+variable "enable_custom_metric_alerts" {
+  description = <<-EOD
+    When true, create the alert policies that reference custom application
+    metrics (``arb/exchange_latency_ms`` and ``arb/daily_loss_pct``). GCP
+    rejects these alert filters until at least one time series for the
+    metric exists. The metric descriptors are pre-created either way, so
+    the runtime services can write data immediately; enable this flag in a
+    follow-up apply once the services have emitted their first samples.
+  EOD
+  type        = bool
+  default     = false
+}
+
 variable "enable_slack_alert_channel" {
   description = <<-EOD
     When true, create a GCP Cloud Monitoring Slack notification channel

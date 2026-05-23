@@ -4,11 +4,14 @@ output "notification_channel_id" {
 }
 
 output "alert_policy_ids" {
-  value = [
-    google_monitoring_alert_policy.cloud_run_error_rate.id,
-    google_monitoring_alert_policy.pubsub_backlog.id,
-    google_monitoring_alert_policy.kill_switch.id,
-    google_monitoring_alert_policy.exchange_latency.id,
-    google_monitoring_alert_policy.daily_loss.id,
-  ]
+  description = "All alert policy IDs created by this module."
+  value = concat(
+    [
+      google_monitoring_alert_policy.cloud_run_error_rate.id,
+      google_monitoring_alert_policy.pubsub_backlog.id,
+      google_monitoring_alert_policy.kill_switch.id,
+    ],
+    google_monitoring_alert_policy.exchange_latency[*].id,
+    google_monitoring_alert_policy.daily_loss[*].id,
+  )
 }
