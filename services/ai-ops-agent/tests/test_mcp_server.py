@@ -64,7 +64,7 @@ def test_propose_dispatch_does_not_mutate() -> None:
         publisher = gp.return_value
         result = call_tool(
             "propose_risk_limit_change",
-            {"rule": "max_position_size_usd", "new_value": 25_000.0, "rationale": "test"},
+            {"rule": "max_daily_loss_pct", "new_value": 2.0, "rationale": "test"},
         )
         assert result["status"] == "queued_for_human_approval"
         # Two publishes: AI_PROPOSALS + AUDIT_LOG

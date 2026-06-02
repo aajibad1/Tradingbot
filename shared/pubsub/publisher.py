@@ -56,10 +56,40 @@ class EventPublisher:
         payload: BaseModel,
         attributes: dict[str, str] | None = None,
     ) -> str:
-        """Fire-and-forget publish; returns the message_id future result."""
+        """Blocking publish; waits for and returns the message_id.
+
+        Use for low-volume events where synchronous delivery confirmation
+        matters (risk alerts, audit). For per-tick / per-rate hot paths use
+        :meth:`publish_nowait` instead — blocking here stalls an async event
+        loop for up to 30s on a slow publish.
+        """
         data = payload.model_dump_json().encode("utf-8")
         future = self.client.publish(self._topic_path(topic), data, **(attributes or {}))
         return future.result(timeout=30)
+
+    def publish_nowait(
+        self,
+        topic: Topic,
+        payload: BaseModel,
+        attributes: dict[str, str] | None = None,
+    ) -> None:
+        """Fire-and-forget publish for hot paths — never blocks the caller.
+
+        The google-cloud-pubsub client batches in background threads, so we
+        hand off the message and attach a callback that logs any delivery
+        failure rather than blocking on ``future.result()``. This is the
+        ``publish`` for the WebSocket tick loop and the funding poll cycle.
+        """
+        data = payload.model_dump_json().encode("utf-8")
+        future = self.client.publish(self._topic_path(topic), data, **(attributes or {}))
+        future.add_done_callback(self._log_publish_error)
+
+    @staticmethod
+    def _log_publish_error(future) -> None:
+        try:
+            future.result()
+        except Exception:  # noqa: BLE001 — background delivery error, log only
+            logger.exception("async pubsub publish failed")
 
     def publish_audit(self, source: str, event: str, payload: BaseModel) -> str:
         return self.publish(
@@ -85,6 +115,15 @@ class NullPublisher:
             json.loads(payload.model_dump_json()),
         )
         return "null-message-id"
+
+    def publish_nowait(
+        self,
+        topic: Topic,
+        payload: BaseModel,
+        attributes: dict[str, str] | None = None,
+    ) -> None:
+        """Fire-and-forget mirror of :meth:`EventPublisher.publish_nowait`."""
+        self.publish(topic, payload, attributes)
 
     def publish_audit(self, source: str, event: str, payload: BaseModel) -> str:
         return self.publish(Topic.AUDIT_LOG, payload, {"source": source, "event": event})

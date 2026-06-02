@@ -18,6 +18,7 @@ from fastapi import FastAPI
 from models import CycleResult, HealthResponse, SourceHealth
 from shared.models.funding_rate import FundingRate
 from shared.pubsub.publisher import Topic, get_publisher
+from shared.utils.log_redact import redact_secrets
 from sources import (
     ArbitrageScannerSource,
     CCXTFundingSource,
@@ -77,18 +78,23 @@ async def _run_cycle(sources: list[FundingSource]) -> list[CycleResult]:
         try:
             rates: list[FundingRate] = list(await source.fetch())
         except Exception as e:
+            # redact: error reprs can embed request URLs / tokens, and
+            # last_error is exposed on /healthz.
+            safe_err = redact_secrets(repr(e))
             _health[source.name].consecutive_failures += 1
-            _health[source.name].last_error = repr(e)
+            _health[source.name].last_error = safe_err
             logger.exception("%s fetch failed", source.name)
             return CycleResult(
                 source=source.name,
                 rates_published=0,
                 duration_ms=int((time.perf_counter() - started) * 1000),
-                error=repr(e),
+                error=safe_err,
             )
 
         for rate in rates:
-            publisher.publish(
+            # Fire-and-forget: a slow publish must not block the poll cycle or
+            # the other sources gathered alongside this one.
+            publisher.publish_nowait(
                 Topic.FUNDING_RATES,
                 rate,
                 attributes={"source": source.name, "exchange": rate.exchange, "asset": rate.asset},
@@ -137,6 +143,11 @@ async def lifespan(app: FastAPI):
         _stop.set()
         if _task is not None:
             await asyncio.gather(_task, return_exceptions=True)
+        # Close any sources holding long-lived clients (e.g. cached CCXT sessions).
+        for s in sources:
+            close = getattr(s, "close", None)
+            if close is not None:
+                await asyncio.gather(close(), return_exceptions=True)
 
 
 app = FastAPI(title="funding-rate-service", version="0.1.0", lifespan=lifespan)

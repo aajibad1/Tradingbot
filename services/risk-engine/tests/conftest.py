@@ -32,6 +32,18 @@ class _FakePipeline:
         self._ops.append(("delete", keys))
         return self
 
+    def incrbyfloat(self, key: str, amount) -> "_FakePipeline":
+        self._ops.append(("incrbyfloat", (key, amount)))
+        return self
+
+    def incr(self, key: str) -> "_FakePipeline":
+        self._ops.append(("incr", (key,)))
+        return self
+
+    def decr(self, key: str) -> "_FakePipeline":
+        self._ops.append(("decr", (key,)))
+        return self
+
     def execute(self) -> list:
         results = []
         for op, args in self._ops:
@@ -72,6 +84,21 @@ class FakeRedis:
             prefix = match[:-1]
             return iter([k for k in list(self._kv) if k.startswith(prefix)])
         return iter([k for k in list(self._kv) if k == match])
+
+    def incrbyfloat(self, key: str, amount) -> float:
+        val = float(self._kv.get(key, 0.0)) + float(amount)
+        self._kv[key] = repr(val)
+        return val
+
+    def incr(self, key: str) -> int:
+        val = int(float(self._kv.get(key, 0))) + 1
+        self._kv[key] = str(val)
+        return val
+
+    def decr(self, key: str) -> int:
+        val = int(float(self._kv.get(key, 0))) - 1
+        self._kv[key] = str(val)
+        return val
 
     def pipeline(self) -> _FakePipeline:
         return _FakePipeline(self)

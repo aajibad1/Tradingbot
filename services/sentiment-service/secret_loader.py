@@ -1,49 +1,19 @@
 """Secret Manager wrapper for sentiment-service API keys.
 
-Falls back to LOCAL_SECRET_<UPPER_SNAKE_ID> env vars when GCP_PROJECT_ID is unset
-(local dev pattern — same shape as funding-rate-service/secret_loader.py).
-
-Returns ``None`` rather than raising when a key is unavailable so that any
+Thin wrapper over ``shared.utils.secret_loader`` with the graceful-degradation
+policy: returns ``None`` rather than raising when a key is unavailable, so a
 single missing source degrades gracefully — fail-open semantics on missing
 sentiment data per the gate's design.
 """
 
 from __future__ import annotations
 
-import logging
-import os
 from functools import lru_cache
 
-logger = logging.getLogger(__name__)
+from shared.utils.secret_loader import get_secret as _shared_get_secret
 
 
 @lru_cache(maxsize=32)
 def get_secret(secret_id: str, version: str = "latest") -> str | None:
-    """Fetch a secret from GCP Secret Manager.
-
-    For local dev, falls back to env var `LOCAL_SECRET_<secret_id_upper>`.
-    Returns None if both GCP and local env are unavailable.
-    """
-    local_env_key = f"LOCAL_SECRET_{secret_id.upper().replace('-', '_')}"
-    if os.environ.get(local_env_key):
-        return os.environ[local_env_key]
-
-    project_id = os.environ.get("GCP_PROJECT_ID")
-    if not project_id:
-        logger.warning(
-            "secret %r requested but GCP_PROJECT_ID and %s both unset — returning None",
-            secret_id,
-            local_env_key,
-        )
-        return None
-
-    try:
-        from google.cloud import secretmanager
-
-        client = secretmanager.SecretManagerServiceClient()
-        name = f"projects/{project_id}/secrets/{secret_id}/versions/{version}"
-        response = client.access_secret_version(request={"name": name})
-        return response.payload.data.decode("utf-8")
-    except Exception as e:  # noqa: BLE001 — degrade gracefully
-        logger.warning("failed to fetch secret %r: %s", secret_id, e)
-        return None
+    """Fetch a secret, or None if unavailable (fail-open on missing data)."""
+    return _shared_get_secret(secret_id, version, required=False)

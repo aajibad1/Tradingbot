@@ -7,6 +7,9 @@ Every proposal must publish to BOTH:
 
 from unittest.mock import patch
 
+import pytest
+
+from permissions import ToolBlockedError
 from shared.pubsub.publisher import Topic
 from tools.propose_tools import (
     propose_risk_limit_change,
@@ -67,13 +70,32 @@ def test_every_propose_call_writes_to_audit_log() -> None:
     """The audit invariant: no proposal exists without an audit-log entry."""
     with patch("tools.propose_tools.get_publisher") as gp:
         publisher = gp.return_value
-        propose_risk_limit_change("max_drawdown_pct", 5.0, "r1")
+        propose_risk_limit_change("max_daily_loss_pct", 5.0, "r1")
         propose_size_adjustment(5_000.0, "r2")
         propose_strategy_pause("funding_capture", "r3")
         topics = _topics_published(publisher)
         # 3 proposals → 3 AI_PROPOSALS + 3 AUDIT_LOG = 6 publishes
         assert topics.count(Topic.AI_PROPOSALS) == 3
         assert topics.count(Topic.AUDIT_LOG) == 3
+
+
+def test_leverage_change_cannot_be_laundered_through_a_proposal() -> None:
+    """M5: a leverage increase is NEVER-tier — it must be blocked at proposal
+    time, not merely at the downstream approval gate. No event is published."""
+    with patch("tools.propose_tools.get_publisher") as gp:
+        for rule in ("max_leverage_multiplier", "leverage_limit", "increase_leverage"):
+            with pytest.raises(ToolBlockedError):
+                propose_risk_limit_change(rule, 5.0, "sneaky")
+        gp.return_value.publish.assert_not_called()
+
+
+def test_risk_limit_proposal_rejects_out_of_bounds_value() -> None:
+    with patch("tools.propose_tools.get_publisher") as gp:
+        with pytest.raises(ValueError):
+            propose_risk_limit_change("max_daily_loss_pct", 999.0, "way too loose")
+        with pytest.raises(ValueError):
+            propose_risk_limit_change("max_daily_loss_pct", -1.0, "negative")
+        gp.return_value.publish.assert_not_called()
 
 
 def test_audit_log_attributes_identify_source() -> None:
