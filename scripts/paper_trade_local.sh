@@ -77,8 +77,10 @@ ok "Risk state seeded"
 # ── start services (local mode: GCP_PROJECT_ID unset → NullPublisher) ────────
 start_service() {
   local name="$1" port="$2"; shift 2
+  # exec so the subshell is REPLACED by uvicorn — then $! is uvicorn's own PID
+  # and the cleanup trap actually kills it (otherwise the grandchild orphans).
   ( cd "$REPO_ROOT/services/$name" \
-      && env -u GCP_PROJECT_ID PYTHONPATH="$REPO_ROOT:." REDIS_URL="$REDIS_URL" "$@" \
+      && exec env -u GCP_PROJECT_ID PYTHONPATH="$REPO_ROOT:." REDIS_URL="$REDIS_URL" "$@" \
          python3 -m uvicorn main:app --port "$port" >"$LOG_DIR/$name.log" 2>&1 ) &
   PIDS+=("$!")
 }
