@@ -38,6 +38,20 @@ from strategies.base import Strategy
 
 _DEFAULT_SIZE_USD = 10_000.0
 _MIN_FUNDING_APR_PCT = 8.0
+# Carry is a multi-period edge: funding accrues every period over the hold while
+# round-trip costs are paid once. The viability math credits funding over this
+# planned hold. This is a TRADING ASSUMPTION (how long we expect to hold the
+# carry) — conservative default, tunable, and the dominant driver of which
+# funding rates clear the net-edge bar.
+_DEFAULT_CARRY_HOLD_HOURS = 72.0
+
+
+def _carry_hold_hours() -> float:
+    """Resolved per-call so deploys/tests can tune the assumed carry horizon."""
+    try:
+        return max(1.0, float(os.environ.get("FUNDING_TARGET_HOLD_HOURS", _DEFAULT_CARRY_HOLD_HOURS)))
+    except ValueError:
+        return _DEFAULT_CARRY_HOLD_HOURS
 
 
 def _negative_funding_enabled() -> bool:
@@ -57,6 +71,7 @@ class FundingRateArbStrategy(Strategy):
         candidates: list[ScoredCandidate] = []
         allow_negative = _negative_funding_enabled()
         require_uptrend = _require_uptrend()
+        hold_hours = _carry_hold_hours()
         for asset in snapshot.assets_with_ticks():
             funding_rates = snapshot.fresh_funding_for_asset(asset)
             if not funding_rates:
@@ -115,6 +130,12 @@ class FundingRateArbStrategy(Strategy):
                 if funding.annualized_pct < 0:
                     conf *= 0.7  # short-spot leg is harder to execute
 
+                # Funding accrues every period over the planned carry hold; the
+                # scorer credits funding_per_period * funding_periods against the
+                # one-time round-trip cost. period_hours is venue-specific (1h HL,
+                # 8h CEX), so the same hold yields more periods on hourly venues.
+                funding_periods = max(1, int(hold_hours // funding.period_hours))
+
                 candidates.append(
                     ScoredCandidate(
                         strategy=StrategyType.FUNDING_RATE_ARB,
@@ -125,9 +146,10 @@ class FundingRateArbStrategy(Strategy):
                         slippage_long_bps=slip_bps,
                         slippage_short_bps=slip_bps,
                         funding_rate_bps_per_period=funding_bps_per_period,
+                        funding_periods=funding_periods,
                         funding_rate_annualized_pct=funding.annualized_pct,
                         recommended_size_usd=_DEFAULT_SIZE_USD,
-                        min_hold_hours=max(4.0, funding.period_hours),
+                        min_hold_hours=hold_hours,
                         confidence_score=conf,
                     )
                 )

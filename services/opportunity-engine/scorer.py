@@ -39,6 +39,7 @@ class ScoredCandidate:
     slippage_long_bps: float
     slippage_short_bps: float
     funding_rate_bps_per_period: float = 0.0
+    funding_periods: int = 1  # funding periods over the planned hold (carry is multi-period)
     funding_rate_annualized_pct: float = 0.0
     recommended_size_usd: float = 10_000.0
     min_hold_hours: float = 4.0
@@ -56,6 +57,7 @@ def score(candidate: ScoredCandidate, now: datetime | None = None) -> Opportunit
         slippage_long_bps=candidate.slippage_long_bps,
         slippage_short_bps=candidate.slippage_short_bps,
         funding_rate_bps_per_period=candidate.funding_rate_bps_per_period,
+        funding_periods=candidate.funding_periods,
         min_viable_net_edge_bps=threshold,
     )
     rejection: str | None = None

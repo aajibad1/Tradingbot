@@ -34,6 +34,28 @@ def test_funding_term_added_once() -> None:
     assert r["is_viable"] is True
 
 
+def test_funding_credited_over_multiple_periods() -> None:
+    # Carry: 12 bps/period funding, zero gross spread, over 9 periods = 108 bps,
+    # minus (26+5+2+2+3)=38 cost → 70 net. One period alone (108→12) would not clear.
+    multi = fc.calculate_net_edge(
+        gross_spread_bps=0.0,
+        long_exchange_taker_fee_bps=26.0, short_exchange_taker_fee_bps=5.0,
+        slippage_long_bps=2.0, slippage_short_bps=2.0,
+        funding_rate_bps_per_period=12.0, funding_periods=9,
+    )
+    assert multi["net_edge_bps"] == pytest.approx(70.0)
+    assert multi["is_viable"] is True
+
+    single = fc.calculate_net_edge(
+        gross_spread_bps=0.0,
+        long_exchange_taker_fee_bps=26.0, short_exchange_taker_fee_bps=5.0,
+        slippage_long_bps=2.0, slippage_short_bps=2.0,
+        funding_rate_bps_per_period=12.0,  # funding_periods defaults to 1
+    )
+    assert single["net_edge_bps"] == pytest.approx(-26.0)
+    assert single["is_viable"] is False
+
+
 def test_threshold_override_can_tighten() -> None:
     r = fc.calculate_net_edge(
         gross_spread_bps=60.0,

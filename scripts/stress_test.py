@@ -62,8 +62,8 @@ def gen_cross_exchange(rng: random.Random) -> dict:
     }
 
 
-def gen_funding(rng: random.Random) -> dict:
-    """Funding-rate carry. Funding APR clustered low with a spike tail."""
+def gen_funding(rng: random.Random, hold_hours: float) -> dict:
+    """Funding-rate carry over a given hold horizon. APR clustered low + spike tail."""
     short_ex = rng.choice(list(PERP_VENUES) + ["kraken", "binance.us"])  # perp leg
     long_ex = rng.choice([e for e in EXCHANGES if e != short_ex])
     asset = rng.choice(list(ASSET_PRICES))
@@ -75,22 +75,27 @@ def gen_funding(rng: random.Random) -> dict:
         "strategy": StrategyType.FUNDING_RATE_ARB, "asset": asset,
         "long_ex": long_ex, "short_ex": short_ex,
         "gross_spread_bps": 0.0, "funding_apr": apr,
-        "size": float(size), "min_hold": max(4.0, _period_hours(short_ex)),
+        "size": float(size), "min_hold": hold_hours,
     }
 
 
-def net_edge_bps(sc: dict) -> float:
-    """Entry decision via the canonical calculator (same inputs the scorer uses)."""
+def net_edge_bps(sc: dict) -> tuple[float, bool]:
+    """Entry decision via the canonical calculator (same inputs the scorer uses).
+
+    Funding is credited over the planned hold (funding_per_period * periods),
+    matching the multi-period carry model in the scorer/strategy.
+    """
     slip = estimate_size_tier_bps(sc["size"])
     period_h = _period_hours(sc["short_ex"])
     rate_per_period = (sc["funding_apr"] / 100.0) * (period_h / HOURS_PER_YEAR)
     funding_bps_per_period = rate_per_period * 10_000.0
+    periods = max(1, int(sc["min_hold"] // period_h))
     r = calculate_net_edge(
         gross_spread_bps=sc["gross_spread_bps"],
         long_exchange_taker_fee_bps=taker_fee_bps(sc["long_ex"]),
         short_exchange_taker_fee_bps=taker_fee_bps(sc["short_ex"]),
         slippage_long_bps=slip, slippage_short_bps=slip,
-        funding_rate_bps_per_period=funding_bps_per_period,
+        funding_rate_bps_per_period=funding_bps_per_period, funding_periods=periods,
     )
     return r["net_edge_bps"], r["is_viable"]
 
@@ -135,10 +140,8 @@ def main() -> None:
     args = ap.parse_args()
     rng = random.Random(args.seed)
 
-    families = {"cross_exchange": gen_cross_exchange, "funding_arb": gen_funding}
-    for fam_name, gen in families.items():
+    def run(label: str, gen, total: int) -> None:
         viable_pnl, viable_edge, all_pnl, viable_n = [], [], [], 0
-        total = args.n
         for _ in range(total):
             sc = gen(rng)
             edge, is_viable = net_edge_bps(sc)
@@ -148,8 +151,7 @@ def main() -> None:
                 viable_n += 1
                 viable_pnl.append(pnl_bps)
                 viable_edge.append(edge)
-
-        print(f"\n=== {fam_name} — {total:,} scenarios ===")
+        print(f"\n=== {label} — {total:,} scenarios ===")
         print(f"  viable (clears net-edge bar): {viable_n:,} ({viable_n/total:.1%})")
         summarize("TRADED (viable only)", viable_pnl)
         summarize("if we took ALL", all_pnl)
@@ -157,9 +159,17 @@ def main() -> None:
             print(f"  modeled net-edge of traded:  mean {statistics.mean(viable_edge):+.1f} bps  "
                   f"vs realized mean {statistics.mean(viable_pnl):+.1f} bps  "
                   f"(erosion {statistics.mean(viable_edge) - statistics.mean(viable_pnl):+.1f} bps)")
-        ev = (sum(viable_pnl) / total)  # expected bps per scenario screened, taking only viable
-        print(f"  EV per screened scenario (bar ON):  {ev:+.3f} bps")
+        print(f"  EV per screened scenario (bar ON):  {sum(viable_pnl)/total:+.3f} bps")
         print(f"  EV per scenario (bar OFF, take all): {sum(all_pnl)/total:+.3f} bps")
+
+    run("cross_exchange (spread)", gen_cross_exchange, args.n)
+
+    # Funding carry is highly sensitive to the assumed hold horizon — sweep it
+    # rather than reporting a single cherry-picked number.
+    print("\n--- funding-rate carry: sensitivity to assumed hold horizon ---")
+    for hold in (24.0, 72.0, 168.0, 336.0):
+        run(f"funding_arb (hold={hold:.0f}h ≈ {hold/24:.1f}d)",
+            lambda r, h=hold: gen_funding(r, h), args.n)
 
 
 if __name__ == "__main__":

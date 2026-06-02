@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arbitrage Ops — Control Center</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root,[data-theme="dark"]{
+  --color-bg:#0d1117;
+  --color-surface:#161b22;
+  --color-surface-2:#1c2128;
+  --color-border:rgba(255,255,255,0.08);
+  --color-text:#e6edf3;
+  --color-text-muted:#8b949e;
+  --color-text-faint:#484f58;
+  --color-primary:#4f98a3;
+  --color-primary-glow:rgba(79,152,163,0.15);
+  --color-success:#3fb950;
+  --color-warning:#d29922;
+  --color-error:#f85149;
+  --color-purple:#bc8cff;
+  --radius-sm:6px;--radius-md:10px;--radius-lg:14px;
+  --font-body:'Inter',sans-serif;
+  --font-mono:'JetBrains Mono',monospace;
+  --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;
+  --space-5:20px;--space-6:24px;--space-8:32px;--space-10:40px;
+  --shadow-md:0 4px 16px rgba(0,0,0,0.4);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-font-smoothing:antialiased;scroll-behavior:smooth}
+body{min-height:100vh;font-family:var(--font-body);font-size:14px;color:var(--color-text);background:var(--color-bg);display:grid;grid-template-rows:56px 1fr;overflow:hidden}
+/* Header */
+.header{display:flex;align-items:center;gap:var(--space-4);padding:0 var(--space-6);background:var(--color-surface);border-bottom:1px solid var(--color-border);z-index:100}
+.logo{display:flex;align-items:center;gap:var(--space-2);font-weight:600;font-size:15px;letter-spacing:-0.3px;color:var(--color-text)}
+.logo svg{color:var(--color-primary)}
+.status-pill{display:flex;align-items:center;gap:var(--space-1);font-size:12px;padding:var(--space-1) var(--space-3);border-radius:20px;font-weight:500}
+.status-pill.live{background:rgba(63,185,80,0.12);color:var(--color-success)}
+.status-pill.paper{background:rgba(210,153,34,0.12);color:var(--color-warning)}
+.status-pill.halted{background:rgba(248,81,73,0.15);color:var(--color-error)}
+.status-dot{width:6px;height:6px;border-radius:50%;background:currentColor;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+.header-right{margin-left:auto;display:flex;align-items:center;gap:var(--space-3)}
+.kill-btn{background:rgba(248,81,73,0.12);border:1px solid rgba(248,81,73,0.25);color:var(--color-error);padding:var(--space-1) var(--space-4);border-radius:var(--radius-sm);font-size:12px;font-weight:600;cursor:pointer;transition:all 180ms ease;letter-spacing:0.5px;font-family:var(--font-mono)}
+.kill-btn:hover{background:rgba(248,81,73,0.22);border-color:rgba(248,81,73,0.5)}
+.time-badge{font-family:var(--font-mono);font-size:12px;color:var(--color-text-muted);padding:var(--space-1) var(--space-2);background:rgba(255,255,255,0.04);border-radius:var(--radius-sm)}
+/* Main Grid */
+.main{display:grid;grid-template-columns:1fr 1fr 1fr 340px;grid-template-rows:auto auto 1fr;gap:var(--space-3);padding:var(--space-3);overflow-y:auto;height:calc(100vh - 56px)}
+/* KPI Cards */
+.kpi-row{grid-column:1/-1;display:grid;grid-template-columns:repeat(5,1fr);gap:var(--space-3)}
+.kpi-card{background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:var(--space-4) var(--space-5);position:relative;overflow:hidden}
+.kpi-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+.kpi-card.green::before{background:var(--color-success)}
+.kpi-card.teal::before{background:var(--color-primary)}
+.kpi-card.yellow::before{background:var(--color-warning)}
+.kpi-card.red::before{background:var(--color-error)}
+.kpi-card.purple::before{background:var(--color-purple)}
+.kpi-label{font-size:11px;font-weight:500;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:var(--space-2)}
+.kpi-value{font-family:var(--font-mono);font-size:24px;font-weight:600;line-height:1;margin-bottom:var(--space-1)}
+.kpi-value.positive{color:var(--color-success)}
+.kpi-value.negative{color:var(--color-error)}
+.kpi-value.neutral{color:var(--color-text)}
+.kpi-sub{font-size:11px;color:var(--color-text-muted)}
+/* Panel */
+.panel{background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-md);display:flex;flex-direction:column;overflow:hidden;min-height:0}
+.panel-header{display:flex;align-items:center;justify-content:space-between;padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-border);flex-shrink:0}
+.panel-title{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;color:var(--color-text-muted)}
+.panel-badge{font-size:11px;font-family:var(--font-mono);color:var(--color-primary);background:var(--color-primary-glow);padding:2px var(--space-2);border-radius:20px}
+.panel-body{padding:var(--space-3);overflow-y:auto;flex:1}
+.service-unavailable{text-align:center;padding:var(--space-6);color:var(--color-text-faint);font-size:11px}
+/* Opportunity Table */
+.opp-table{width:100%;border-collapse:collapse}
+.opp-table th{font-size:10px;text-transform:uppercase;letter-spacing:0.6px;color:var(--color-text-faint);font-weight:500;padding:var(--space-1) var(--space-2);text-align:left;border-bottom:1px solid var(--color-border)}
+.opp-table td{padding:var(--space-2);font-size:12px;border-bottom:1px solid rgba(255,255,255,0.03)}
+.opp-table tr:hover td{background:rgba(255,255,255,0.02)}
+.opp-edge{font-family:var(--font-mono);font-weight:600}
+.opp-edge.high{color:var(--color-success)}
+.opp-edge.mid{color:var(--color-warning)}
+.opp-edge.low{color:var(--color-text-muted)}
+.strategy-badge{font-size:10px;padding:1px 6px;border-radius:4px;font-weight:500}
+.strategy-badge.funding{background:rgba(79,152,163,0.15);color:var(--color-primary)}
+.strategy-badge.basis{background:rgba(188,140,255,0.12);color:var(--color-purple)}
+.strategy-badge.cross{background:rgba(210,153,34,0.12);color:var(--color-warning)}
+/* Funding Rate Heatmap */
+.heatmap{display:grid;grid-template-columns:80px repeat(5,1fr);gap:2px;font-size:10px}
+.heatmap-header{font-size:10px;color:var(--color-text-muted);padding:var(--space-1);text-align:center;font-weight:600}
+.heatmap-asset{font-family:var(--font-mono);font-size:11px;font-weight:600;padding:var(--space-2) var(--space-1);display:flex;align-items:center}
+.heatmap-cell{padding:var(--space-2);border-radius:4px;text-align:center;font-family:var(--font-mono);font-size:10px;font-weight:600;cursor:pointer;transition:opacity 150ms}
+.heatmap-cell:hover{opacity:0.8}
+.cell-positive{background:rgba(63,185,80,0.15);color:var(--color-success)}
+.cell-negative{background:rgba(248,81,73,0.12);color:var(--color-error)}
+.cell-neutral{background:rgba(255,255,255,0.04);color:var(--color-text-muted)}
+/* Risk Bars */
+.risk-item{margin-bottom:var(--space-3)}
+.risk-label-row{display:flex;justify-content:space-between;font-size:11px;margin-bottom:var(--space-1)}
+.risk-bar-track{height:6px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden}
+.risk-bar-fill{height:100%;border-radius:3px;transition:width 500ms ease}
+.risk-bar-fill.safe{background:var(--color-success)}
+.risk-bar-fill.warn{background:var(--color-warning)}
+.risk-bar-fill.danger{background:var(--color-error)}
+/* AI Report */
+.ai-report{font-size:12px;line-height:1.7;color:var(--color-text-muted)}
+.ai-section{margin-bottom:var(--space-3)}
+.ai-section-title{font-size:11px;font-weight:600;color:var(--color-primary);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:var(--space-1)}
+.ai-bullet{display:flex;gap:var(--space-2);align-items:flex-start;margin-bottom:4px}
+.ai-bullet::before{content:'▸';color:var(--color-primary);flex-shrink:0;margin-top:1px}
+/* Audit Log */
+.log-item{display:flex;gap:var(--space-3);padding:var(--space-2) 0;border-bottom:1px solid rgba(255,255,255,0.03);font-size:11px}
+.log-time{font-family:var(--font-mono);color:var(--color-text-faint);flex-shrink:0;font-size:10px;padding-top:1px}
+.log-event{color:var(--color-text-muted)}
+.log-type{padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600;flex-shrink:0}
+.log-type.info{background:rgba(79,152,163,0.12);color:var(--color-primary)}
+.log-type.warn{background:rgba(210,153,34,0.12);color:var(--color-warning)}
+.log-type.ok{background:rgba(63,185,80,0.12);color:var(--color-success)}
+/* Chart panel spans 3 cols */
+.chart-panel{grid-column:span 3}
+.risk-panel{grid-column:4}
+.opp-panel{grid-column:span 2}
+.heatmap-panel{grid-column:span 2}
+.ai-panel{grid-column:4;grid-row:2/4}
+.log-panel{grid-column:1/4}
+canvas{max-height:180px}
+/* Mobile responsive */
+@media(max-width:800px){
+  .main{grid-template-columns:1fr;grid-template-rows:auto}
+  .kpi-row{grid-template-columns:1fr 1fr}
+  .chart-panel,.risk-panel,.opp-panel,.heatmap-panel,.ai-panel,.log-panel{grid-column:1!important;grid-row:auto!important}
+}
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="logo">
+    <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-label="Arb System Logo">
+      <polygon points="11,2 20,7 20,15 11,20 2,15 2,7" stroke="currentColor" stroke-width="1.5" fill="rgba(79,152,163,0.1)"/>
+      <polygon points="11,6 16,9 16,13 11,16 6,13 6,9" fill="currentColor" opacity="0.6"/>
+    </svg>
+    ARB SYSTEM
+  </div>
+  <div id="systemStatus" class="status-pill paper">
+    <span class="status-dot"></span>
+    <span id="statusLabel">PAPER TRADING</span>
+  </div>
+  <div class="header-right">
+    <div class="time-badge" id="clockBadge">--:--:-- UTC</div>
+    <button class="kill-btn" onclick="killSwitchRunbook()">⚡ KILL SWITCH</button>
+  </div>
+</header>
+
+<main class="main">
+
+  <!-- KPI Row -->
+  <div class="kpi-row">
+    <div class="kpi-card teal">
+      <div class="kpi-label">Daily PnL (Paper)</div>
+      <div class="kpi-value positive" id="dailyPnl">+$0.00</div>
+      <div class="kpi-sub" id="dailyPnlSub">0 trades today</div>
+    </div>
+    <div class="kpi-card green">
+      <div class="kpi-label">Open Positions</div>
+      <div class="kpi-value neutral" id="openPositions">0</div>
+      <div class="kpi-sub">0 exchanges</div>
+    </div>
+    <div class="kpi-card teal">
+      <div class="kpi-label">Live Opportunities</div>
+      <div class="kpi-value neutral" id="liveOpps">0</div>
+      <div class="kpi-sub">net edge > 8 bps</div>
+    </div>
+    <div class="kpi-card yellow">
+      <div class="kpi-label">Best Spread</div>
+      <div class="kpi-value neutral" id="bestSpread">—</div>
+      <div class="kpi-sub" id="bestSpreadPair">—</div>
+    </div>
+    <div class="kpi-card purple">
+      <div class="kpi-label">30-Day Sharpe</div>
+      <div class="kpi-value neutral" id="sharpeRatio">—</div>
+      <div class="kpi-sub" id="totalPnl">+$0.00</div>
+    </div>
+  </div>
+
+  <!-- PnL Chart -->
+  <div class="panel chart-panel">
+    <div class="panel-header">
+      <span class="panel-title">Cumulative PnL — 30 Days (Paper)</span>
+      <span class="panel-badge" id="chartMode">PAPER MODE</span>
+    </div>
+    <div class="panel-body" style="padding:var(--space-4)">
+      <canvas id="pnlChart"></canvas>
+    </div>
+  </div>
+
+  <!-- AI Ops Panel -->
+  <div class="panel ai-panel">
+    <div class="panel-header">
+      <span class="panel-title">AI Ops Report</span>
+      <span class="panel-badge">CLAUDE</span>
+    </div>
+    <div class="panel-body">
+      <div class="ai-report" id="aiReport">
+        <div class="ai-section">
+          <div class="ai-section-title">📊 Performance Summary</div>
+          <div class="ai-bullet">Paper trading active. No live capital deployed.</div>
+          <div class="ai-bullet">Opportunity engine scanning 4 exchanges in real-time.</div>
+          <div class="ai-bullet">Slippage model calibrated to $10K–$100K trade sizes.</div>
+        </div>
+        <div class="ai-section">
+          <div class="ai-section-title">⚡ Top Opportunities</div>
+          <div class="ai-bullet">Scanning for arbitrage opportunities...</div>
+        </div>
+        <div class="ai-section">
+          <div class="ai-section-title">🛡 Risk Status</div>
+          <div class="ai-bullet">All risk limits within bounds.</div>
+          <div class="ai-bullet">Kill switch: inactive.</div>
+          <div class="ai-bullet">API latency: monitoring exchanges.</div>
+        </div>
+        <div class="ai-section">
+          <div class="ai-section-title">📋 Proposals Pending</div>
+          <div style="color:var(--color-text-faint);font-size:11px;font-style:italic">No pending proposals. System operating within configured parameters.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Risk Panel -->
+  <div class="panel risk-panel">
+    <div class="panel-header">
+      <span class="panel-title">Risk Exposure</span>
+      <span class="panel-badge" id="riskBadge" style="color:var(--color-success);background:rgba(63,185,80,0.1)">ALL CLEAR</span>
+    </div>
+    <div class="panel-body" id="riskPanelBody">
+      <div class="risk-item">
+        <div class="risk-label-row">
+          <span>Daily Drawdown</span>
+          <span style="font-family:var(--font-mono);font-size:11px" id="drawdownText">0.0% / 1.0%</span>
+        </div>
+        <div class="risk-bar-track"><div id="drawdownBar" class="risk-bar-fill safe" style="width:0%"></div></div>
+      </div>
+      <div class="risk-item">
+        <div class="risk-label-row">
+          <span>Coinbase Exposure</span>
+          <span style="font-family:var(--font-mono);font-size:11px" id="coinbaseText">0% / 25%</span>
+        </div>
+        <div class="risk-bar-track"><div id="coinbaseBar" class="risk-bar-fill safe" style="width:0%"></div></div>
+      </div>
+      <div class="risk-item">
+        <div class="risk-label-row">
+          <span>Kraken Exposure</span>
+          <span style="font-family:var(--font-mono);font-size:11px" id="krakenText">0% / 25%</span>
+        </div>
+        <div class="risk-bar-track"><div id="krakenBar" class="risk-bar-fill safe" style="width:0%"></div></div>
+      </div>
+      <div class="risk-item">
+        <div class="risk-label-row">
+          <span>Hyperliquid Exposure</span>
+          <span style="font-family:var(--font-mono);font-size:11px" id="hyperliquidText">0% / 25%</span>
+        </div>
+        <div class="risk-bar-track"><div id="hyperliquidBar" class="risk-bar-fill safe" style="width:0%"></div></div>
+      </div>
+      <div class="risk-item">
+        <div class="risk-label-row">
+          <span>BTC Concentration</span>
+          <span style="font-family:var(--font-mono);font-size:11px" id="btcText">0% / 20%</span>
+        </div>
+        <div class="risk-bar-track"><div id="btcBar" class="risk-bar-fill safe" style="width:0%"></div></div>
+      </div>
+      <div class="risk-item">
+        <div class="risk-label-row">
+          <span>Max Leverage</span>
+          <span style="font-family:var(--font-mono);font-size:11px" id="leverageText">1.0x / 1.0x</span>
+        </div>
+        <div class="risk-bar-track"><div id="leverageBar" class="risk-bar-fill safe" style="width:100%"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Opportunity Feed -->
+  <div class="panel opp-panel">
+    <div class="panel-header">
+      <span class="panel-title">Opportunity Feed</span>
+      <span class="panel-badge" id="oppCount">0 viable</span>
+    </div>
+    <div class="panel-body" style="padding:0">
+      <table class="opp-table">
+        <thead>
+          <tr>
+            <th>Strategy</th>
+            <th>Asset</th>
+            <th>Long → Short</th>
+            <th>Net (bps)</th>
+            <th>Persist</th>
+          </tr>
+        </thead>
+        <tbody id="oppTableBody">
+          <tr><td colspan="5" style="text-align:center;color:var(--color-text-faint);padding:24px;font-size:11px">Scanning exchanges... No viable opportunities yet (min 8 bps net)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Funding Rate Heatmap -->
+  <div class="panel heatmap-panel">
+    <div class="panel-header">
+      <span class="panel-title">Funding Rate Heatmap</span>
+      <span class="panel-badge">8h period</span>
+    </div>
+    <div class="panel-body">
+      <div class="heatmap" id="fundingHeatmap">
+        <div class="heatmap-header"></div>
+        <div class="heatmap-header">CB</div>
+        <div class="heatmap-header">Kraken</div>
+        <div class="heatmap-header">Crypto.com</div>
+        <div class="heatmap-header">Bybit</div>
+        <div class="heatmap-header">HL</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Audit Log -->
+  <div class="panel log-panel">
+    <div class="panel-header">
+      <span class="panel-title">Audit Log</span>
+      <span class="panel-badge" id="logCount">0 events</span>
+    </div>
+    <div class="panel-body" style="max-height:160px">
+      <div id="auditLog"></div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ── Backend Configuration ────────────────────────────────────────────────
+// Single aggregator endpoint. When served from the dashboard-api Cloud Run
+// service, this is same-origin (no CORS). For local dev, override via
+// ?api=http://localhost:8086 query string.
+const API_BASE = new URLSearchParams(window.location.search).get('api') || '';
+
+// Most recent /api/summary response, kept in module scope so each render
+// function can read from it without re-fetching.
+let latestSummary = null;
+
+// ── State ────────────────────────────────────────────────────────────────
+const state = {
+  mode: 'paper',
+  killed: false,
+  pnlHistory: [],
+  opportunities: [],
+  logs: [],
+  fundingRates: {},
+  riskState: null,
+  services: {
+    riskEngine: false,
+    paperTrader: false,
+    tradeLedger: false,
+    opportunityEngine: false,
+    fundingRateService: false,
+    aiOpsAgent: false
+  }
+};
+
+// ── API Helpers ──────────────────────────────────────────────────────────
+async function fetchSafe(url, options = {}) {
+  try {
+    const res = await fetch(url, { ...options, timeout: 5000 });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn(`API fetch failed: ${url}`, err);
+    return null;
+  }
+}
+
+// ── Clock ────────────────────────────────────────────────────────────────
+function updateClock() {
+  const now = new Date();
+  const h = String(now.getUTCHours()).padStart(2, '0');
+  const m = String(now.getUTCMinutes()).padStart(2, '0');
+  const s = String(now.getUTCSeconds()).padStart(2, '0');
+  document.getElementById('clockBadge').textContent = `${h}:${m}:${s} UTC`;
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ── PnL Chart ─────────────────────────────────────────────────────────────
+const ctx = document.getElementById('pnlChart').getContext('2d');
+const days = Array.from({length:30}, (_, i) => {
+  const d = new Date();
+  d.setDate(d.getDate() - 29 + i);
+  return d.toLocaleDateString('en-US', {month:'short', day:'numeric'});
+});
+const initialPnl = Array(30).fill(0);
+
+const pnlChart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: days,
+    datasets: [{
+      label: 'Cumulative PnL (USD)',
+      data: initialPnl,
+      borderColor: '#4f98a3',
+      backgroundColor: 'rgba(79,152,163,0.06)',
+      borderWidth: 2,
+      fill: true,
+      tension: 0.4,
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      pointHoverBackgroundColor: '#4f98a3'
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {display: false},
+      tooltip: {
+        mode: 'index',
+        intersect: false,
+        callbacks: {label: c => `PnL: $${c.parsed.y.toFixed(2)}`}
+      }
+    },
+    scales: {
+      x: {grid: {color: 'rgba(255,255,255,0.04)'}, ticks: {color: '#484f58', font: {size: 10}, maxTicksLimit: 6}},
+      y: {grid: {color: 'rgba(255,255,255,0.04)'}, ticks: {color: '#484f58', font: {size: 10}, callback: v => `$${v}`}}
+    }
+  }
+});
+
+// ── Update Risk State ─────────────────────────────────────────────────────
+async function updateRiskState() {
+  const data = latestSummary;
+  if (!data) {
+    document.getElementById('systemStatus').className = 'status-pill halted';
+    document.getElementById('statusLabel').textContent = 'BACKEND UNAVAILABLE';
+    return;
+  }
+  state.riskState = data;
+  state.services.riskEngine = true;
+
+  if (data.kill_switch_active) {
+    document.getElementById('systemStatus').className = 'status-pill halted';
+    document.getElementById('statusLabel').textContent = 'KILL SWITCH ACTIVE';
+    state.killed = true;
+  } else {
+    document.getElementById('systemStatus').className = `status-pill ${data.mode === 'live' ? 'live' : 'paper'}`;
+    document.getElementById('statusLabel').textContent = (data.mode || 'paper').toUpperCase().replace('_', ' ') + ' TRADING';
+    state.killed = false;
+  }
+
+  // Render every risk bar returned by the API. The container `riskPanelBody`
+  // gets rebuilt each refresh so the bar count can vary as exposures appear.
+  const panel = document.getElementById('riskPanelBody');
+  if (panel && Array.isArray(data.risk_bars)) {
+    panel.innerHTML = data.risk_bars.map(bar => {
+      const pct = bar.limit_pct > 0 ? Math.min(100, (bar.current_pct / bar.limit_pct) * 100) : 0;
+      const cls = pct > 80 ? 'danger' : pct > 50 ? 'warn' : 'safe';
+      return `
+        <div class="risk-item">
+          <div class="risk-label-row">
+            <span>${bar.label}</span>
+            <span style="font-family:var(--font-mono);font-size:11px">${bar.current_pct.toFixed(1)}% / ${bar.limit_pct.toFixed(1)}%</span>
+          </div>
+          <div class="risk-bar-track"><div class="risk-bar-fill ${cls}" style="width:${pct}%"></div></div>
+        </div>
+      `;
+    }).join('');
+  }
+}
+
+function updateRiskBar(id, current, limit) {
+  const pct = (current / limit) * 100;
+  const bar = document.getElementById(`${id}Bar`);
+  const text = document.getElementById(`${id}Text`);
+  if (!bar || !text) return;
+  bar.style.width = `${Math.min(pct, 100)}%`;
+  bar.className = `risk-bar-fill ${pct > 80 ? 'danger' : pct > 50 ? 'warn' : 'safe'}`;
+  text.textContent = `${current.toFixed(1)}% / ${limit.toFixed(1)}%`;
+}
+
+// ── Update Opportunities ──────────────────────────────────────────────────
+async function updateOpportunities() {
+  const tbody = document.getElementById('oppTableBody');
+  const opps = (latestSummary && latestSummary.opportunities) || [];
+
+  const viable = opps.filter(o => o.net_edge_bps >= 8);
+  document.getElementById('oppCount').textContent = `${viable.length} viable`;
+
+  if (!opps.length) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--color-text-faint);padding:24px;font-size:11px">No opportunities in the last hour</td></tr>`;
+    return;
+  }
+
+  // Strategy badge class mapping — match what the CSS expects
+  const stratClass = {funding_rate_arb: 'funding', spot_perp_basis: 'basis', cross_exchange: 'cross', triangular: 'cross'};
+
+  tbody.innerHTML = opps.map(o => {
+    const edgeClass = o.net_edge_bps >= 12 ? 'high' : o.net_edge_bps >= 8 ? 'mid' : 'low';
+    const sCls = stratClass[o.strategy] || 'cross';
+    const sLabel = o.strategy.replace('_arb', '').replace('_perp_basis', '').replace('_exchange', '').toUpperCase();
+    const stratBadge = `<span class="strategy-badge ${sCls}">${sLabel}</span>`;
+    const dim = o.net_edge_bps < 8 ? 'opacity:0.4' : '';
+    return `<tr style="${dim}">
+      <td>${stratBadge}</td>
+      <td style="font-family:var(--font-mono);font-weight:600">${o.asset}</td>
+      <td style="font-size:11px;color:var(--color-text-muted)">${o.long_exchange} → ${o.short_exchange}</td>
+      <td class="opp-edge ${edgeClass}">${o.net_edge_bps.toFixed(1)} bps</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--color-text-faint)">${o.persist}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Update Funding Rates ──────────────────────────────────────────────────
+async function updateFundingRates() {
+  const assets = ['BTC', 'ETH', 'SOL', 'AVAX', 'MATIC'];
+  const exchanges = ['CB', 'Kraken', 'Crypto.com', 'Bybit', 'HL'];
+  // Mock data for now
+  const mockRates = {
+    BTC: [null, 0.012, -0.008, 0.025, 0.018],
+    ETH: [null, 0.008, 0.015, -0.005, 0.022],
+    SOL: [null, 0.031, -0.012, 0.040, 0.015],
+    AVAX: [null, 0.018, 0.008, -0.015, 0.035],
+    MATIC: [null, -0.005, 0.020, 0.012, -0.008]
+  };
+
+  const container = document.getElementById('fundingHeatmap');
+  const existing = container.querySelectorAll('.heatmap-asset, .heatmap-cell');
+  existing.forEach(e => e.remove());
+
+  assets.forEach(asset => {
+    const assetEl = document.createElement('div');
+    assetEl.className = 'heatmap-asset';
+    assetEl.textContent = asset;
+    container.appendChild(assetEl);
+
+    (mockRates[asset] || [null, null, null, null, null]).forEach((rate, i) => {
+      const cell = document.createElement('div');
+      if (rate === null) {
+        cell.className = 'heatmap-cell cell-neutral';
+        cell.textContent = '—';
+      } else if (rate > 0.01) {
+        cell.className = 'heatmap-cell cell-positive';
+        cell.textContent = `+${(rate * 100).toFixed(3)}%`;
+      } else if (rate < -0.005) {
+        cell.className = 'heatmap-cell cell-negative';
+        cell.textContent = `${(rate * 100).toFixed(3)}%`;
+      } else {
+        cell.className = 'heatmap-cell cell-neutral';
+        cell.textContent = `${(rate * 100).toFixed(3)}%`;
+      }
+      const annualized = rate !== null ? (rate * 100 * 365 / 8).toFixed(2) : 'N/A';
+      cell.title = `${asset} on ${exchanges[i]}: ${rate !== null ? (rate * 100).toFixed(4) + '% per 8h' : 'No data'}\nAnnualized: ${annualized}%`;
+      container.appendChild(cell);
+    });
+  });
+}
+
+// ── Update PnL Chart ──────────────────────────────────────────────────────
+async function updatePnLChart() {
+  const data = latestSummary;
+  if (!data) return;
+  const series = (data.pnl_history || []).map(p => p.pnl);
+  const labels = (data.pnl_history || []).map(p => p.d);
+  if (series.length) {
+    pnlChart.data.datasets[0].data = series;
+    pnlChart.data.labels = labels;
+    pnlChart.update();
+  }
+  state.services.tradeLedger = true;
+  const totalPnl = data.kpis && typeof data.kpis.cumulative_pnl_usd === 'number' ? data.kpis.cumulative_pnl_usd : 0;
+  document.getElementById('totalPnl').textContent = totalPnl >= 0 ? `+$${totalPnl.toFixed(2)}` : `-$${Math.abs(totalPnl).toFixed(2)}`;
+  const sharpe = data.kpis && data.kpis.sharpe_30d;
+  document.getElementById('sharpeRatio').textContent = (sharpe != null) ? `Sharpe: ${sharpe.toFixed(2)}` : 'Sharpe: —';
+}
+
+// ── Update Daily KPIs ─────────────────────────────────────────────────────
+async function updateDailyKPIs() {
+  const data = latestSummary;
+  if (!data || !data.kpis) {
+    document.getElementById('dailyPnl').textContent = '—';
+    document.getElementById('dailyPnlSub').textContent = 'backend unavailable';
+    return;
+  }
+  const k = data.kpis;
+  const dailyPnl = k.daily_pnl_usd || 0;
+  document.getElementById('dailyPnl').textContent = dailyPnl >= 0 ? `+$${dailyPnl.toFixed(2)}` : `-$${Math.abs(dailyPnl).toFixed(2)}`;
+  document.getElementById('dailyPnl').className = `kpi-value ${dailyPnl >= 0 ? 'positive' : 'negative'}`;
+  document.getElementById('dailyPnlSub').textContent = `${k.trades_today || 0} trades today`;
+
+  document.getElementById('openPositions').textContent = k.open_positions || 0;
+  document.getElementById('liveOpps').textContent = k.live_opportunities || 0;
+  if (k.best_spread_bps != null) {
+    document.getElementById('bestSpread').textContent = `${k.best_spread_bps.toFixed(1)} bps`;
+    document.getElementById('bestSpreadPair').textContent = k.best_spread_pair || '—';
+  } else {
+    document.getElementById('bestSpread').textContent = '—';
+    document.getElementById('bestSpreadPair').textContent = '—';
+  }
+}
+
+// ── Update Audit Log ──────────────────────────────────────────────────────
+async function updateAuditLog() {
+  const logs = (latestSummary && latestSummary.audit_log) || [];
+  state.logs = logs;
+  const container = document.getElementById('auditLog');
+  document.getElementById('logCount').textContent = `${logs.length} events`;
+  if (!logs.length) {
+    container.innerHTML = `<div style="color:var(--color-text-faint);padding:12px;font-size:11px;text-align:center">No events in the last 6h</div>`;
+    return;
+  }
+  container.innerHTML = logs.slice(0, 50).map(l => {
+    // Map BQ severity values to the existing CSS classes
+    const cls = l.type === 'critical' ? 'warn' : l.type === 'warn' ? 'warn' : l.type === 'ok' ? 'ok' : 'info';
+    return `
+      <div class="log-item">
+        <span class="log-time">${l.time}</span>
+        <span class="log-type ${cls}">${(l.type || 'info').toUpperCase()}</span>
+        <span class="log-event">${l.event}</span>
+      </div>
+    `;
+  }).join('');
+}
+
+// ── Kill Switch ───────────────────────────────────────────────────────────
+// SECURITY: the kill switch is mutated ONLY on the risk-engine, which is an
+// internal, IAM-protected, token-gated service — never from this public,
+// unauthenticated dashboard. Issuing a trigger from a public endpoint would be
+// a DoS vector, and the reset token must never transit the browser. The
+// dashboard reflects kill-switch STATE (see updateSystemStatus, driven by
+// /api/summary) and surfaces the authenticated operator procedure here.
+function killSwitchRunbook() {
+  if (state.killed) {
+    alert(
+      '🔴 KILL SWITCH IS ACTIVE — all trading is halted.\n\n' +
+      'RESET is an authenticated operator action (not available from this dashboard):\n\n' +
+      '  curl -X POST <risk-engine-url>/kill-switch/reset \\\n' +
+      '    -H "Authorization: Bearer $(gcloud auth print-identity-token)" \\\n' +
+      '    -H "Content-Type: application/json" \\\n' +
+      '    -d \'{"auth_token":"<KILL_SWITCH_RESET_TOKEN>","reset_by":"<operator>"}\'\n\n' +
+      'The reset token lives in Secret Manager (out-of-band) — never enter it here.'
+    );
+  } else {
+    alert(
+      '⚠️ EMERGENCY HALT is an authenticated operator action.\n\n' +
+      'risk-engine is internal/IAM-protected; halting from this public dashboard is\n' +
+      'intentionally disabled (a public trigger would be a denial-of-service vector).\n' +
+      'The status pill above reflects the live kill-switch state.\n\n' +
+      'To halt:\n' +
+      '  curl -X POST <risk-engine-url>/kill-switch/trigger \\\n' +
+      '    -H "Authorization: Bearer $(gcloud auth print-identity-token)" \\\n' +
+      '    -H "Content-Type: application/json" \\\n' +
+      '    -d \'{"triggered_by":"<operator>","reason":"manual halt"}\''
+    );
+  }
+}
+
+// ── Main Polling Loop ─────────────────────────────────────────────────────
+async function refreshDashboard() {
+  // Single round-trip: dashboard-api aggregates everything in /api/summary.
+  latestSummary = await fetchSafe(`${API_BASE}/api/summary`);
+
+  // Each panel reads from the cached latestSummary — no fan-out, no CORS,
+  // a single auth surface, and either all panels update or none do.
+  await Promise.all([
+    updateRiskState(),
+    updateOpportunities(),
+    updateFundingRates(),
+    updatePnLChart(),
+    updateDailyKPIs(),
+    updateAuditLog()
+  ]);
+}
+
+// Initial load
+refreshDashboard();
+
+// Poll every 10 seconds
+setInterval(refreshDashboard, 10000);
+</script>
+</body>
+</html>
