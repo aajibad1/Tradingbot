@@ -44,14 +44,35 @@ _MIN_FUNDING_APR_PCT = 8.0
 # carry) — conservative default, tunable, and the dominant driver of which
 # funding rates clear the net-edge bar.
 _DEFAULT_CARRY_HOLD_HOURS = 72.0
+# Hard cap: the stress sweep showed that extending the assumed hold to book more
+# trades manufactures fake edge — at 14d the modeled edge ran ~10x realized and
+# the median trade went negative. Cap the horizon so that trap is structurally
+# unreachable regardless of the env override.
+_MAX_CARRY_HOLD_HOURS = 72.0
+
+# Credited funding is haircut by this factor for early exit (the position can
+# close before the full hold) and funding mean-reversion (later periods earn
+# less than the entry rate). Calibrated against the simulator so the modeled
+# edge tracks realized PnL rather than running 1.5–10x optimistic. A TRADING
+# ASSUMPTION — tunable, conservative by default.
+_DEFAULT_FUNDING_PERSISTENCE = 0.6
 
 
 def _carry_hold_hours() -> float:
-    """Resolved per-call so deploys/tests can tune the assumed carry horizon."""
+    """Assumed carry horizon, clamped to a conservative hard cap."""
     try:
-        return max(1.0, float(os.environ.get("FUNDING_TARGET_HOLD_HOURS", _DEFAULT_CARRY_HOLD_HOURS)))
+        requested = float(os.environ.get("FUNDING_TARGET_HOLD_HOURS", _DEFAULT_CARRY_HOLD_HOURS))
     except ValueError:
-        return _DEFAULT_CARRY_HOLD_HOURS
+        requested = _DEFAULT_CARRY_HOLD_HOURS
+    return min(_MAX_CARRY_HOLD_HOURS, max(1.0, requested))
+
+
+def _funding_persistence() -> float:
+    """Funding haircut in (0, 1]; tunable via env."""
+    try:
+        return min(1.0, max(0.0, float(os.environ.get("FUNDING_PERSISTENCE", _DEFAULT_FUNDING_PERSISTENCE))))
+    except ValueError:
+        return _DEFAULT_FUNDING_PERSISTENCE
 
 
 def _negative_funding_enabled() -> bool:
@@ -72,6 +93,7 @@ class FundingRateArbStrategy(Strategy):
         allow_negative = _negative_funding_enabled()
         require_uptrend = _require_uptrend()
         hold_hours = _carry_hold_hours()
+        persistence = _funding_persistence()
         for asset in snapshot.assets_with_ticks():
             funding_rates = snapshot.fresh_funding_for_asset(asset)
             if not funding_rates:
@@ -147,6 +169,7 @@ class FundingRateArbStrategy(Strategy):
                         slippage_short_bps=slip_bps,
                         funding_rate_bps_per_period=funding_bps_per_period,
                         funding_periods=funding_periods,
+                        funding_persistence=persistence,
                         funding_rate_annualized_pct=funding.annualized_pct,
                         recommended_size_usd=_DEFAULT_SIZE_USD,
                         min_hold_hours=hold_hours,

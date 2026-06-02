@@ -75,6 +75,7 @@ def calculate_net_edge(
     slippage_short_bps: float,
     funding_rate_bps_per_period: float = 0.0,
     funding_periods: int = 1,
+    funding_persistence: float = 1.0,
     transfer_cost_bps: float = 0.0,
     borrow_cost_bps: float = 0.0,
     safety_buffer_bps: float = DEFAULT_SAFETY_BUFFER_BPS,
@@ -89,6 +90,14 @@ def calculate_net_edge(
     credited is ``funding_rate_bps_per_period * funding_periods``. The default
     of 1 makes a single-period (or non-funding) call behave exactly as before —
     spread strategies pass funding 0 and are unaffected.
+
+    ``funding_persistence`` (0..1) haircuts the credited funding to account for
+    early exit (the position closes before the full hold) and funding
+    mean-reversion (later periods earn less than the entry rate). Crediting the
+    full entry-rate over the full hold systematically OVERSTATES carry edge —
+    the stress test showed the modeled edge running 1.5–10x the realized PnL as
+    the assumed hold grew. The default 1.0 preserves legacy behaviour; the
+    funding strategy passes a calibrated discount.
 
     ``is_viable`` is True when ``net_edge_bps > threshold``, where the
     threshold defaults to the module-level ``MIN_VIABLE_NET_EDGE_BPS`` but
@@ -106,7 +115,7 @@ def calculate_net_edge(
         + borrow_cost_bps
         + safety_buffer_bps
     )
-    funding_total_bps = funding_rate_bps_per_period * funding_periods
+    funding_total_bps = funding_rate_bps_per_period * funding_periods * funding_persistence
     net_edge_bps = gross_spread_bps + funding_total_bps - total_cost_bps
     threshold = (
         min_viable_net_edge_bps

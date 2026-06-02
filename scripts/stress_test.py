@@ -40,6 +40,10 @@ EXCHANGES = ["coinbase", "kraken", "crypto.com", "binance.us", "hyperliquid"]
 PERP_VENUES = {"hyperliquid"}  # 1h funding; others 8h
 ASSET_PRICES = {"BTC": 60_000.0, "ETH": 3_000.0, "SOL": 150.0}
 HOURS_PER_YEAR = 365 * 24
+# Mirrors the strategy: funding is haircut for early-exit/mean-reversion, and
+# production hard-caps the hold at 72h (rows above that show why we cap).
+FUNDING_PERSISTENCE = 0.6
+PROD_MAX_HOLD_HOURS = 72.0
 
 
 def _period_hours(exchange: str) -> float:
@@ -96,6 +100,7 @@ def net_edge_bps(sc: dict) -> tuple[float, bool]:
         short_exchange_taker_fee_bps=taker_fee_bps(sc["short_ex"]),
         slippage_long_bps=slip, slippage_short_bps=slip,
         funding_rate_bps_per_period=funding_bps_per_period, funding_periods=periods,
+        funding_persistence=FUNDING_PERSISTENCE,
     )
     return r["net_edge_bps"], r["is_viable"]
 
@@ -167,8 +172,12 @@ def main() -> None:
     # Funding carry is highly sensitive to the assumed hold horizon — sweep it
     # rather than reporting a single cherry-picked number.
     print("\n--- funding-rate carry: sensitivity to assumed hold horizon ---")
+    print(f"    (persistence haircut {FUNDING_PERSISTENCE}; production hard-caps hold at "
+          f"{PROD_MAX_HOLD_HOURS:.0f}h — rows beyond that are 'why we cap', not shippable)")
     for hold in (24.0, 72.0, 168.0, 336.0):
-        run(f"funding_arb (hold={hold:.0f}h ≈ {hold/24:.1f}d)",
+        capped = " [PROD CAP]" if hold == PROD_MAX_HOLD_HOURS else (
+            " [blocked in prod]" if hold > PROD_MAX_HOLD_HOURS else "")
+        run(f"funding_arb (hold={hold:.0f}h ≈ {hold/24:.1f}d){capped}",
             lambda r, h=hold: gen_funding(r, h), args.n)
 
 
