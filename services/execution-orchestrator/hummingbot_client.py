@@ -90,6 +90,11 @@ class HummingbotOrderRequest:
             "size_usd": self.size_usd,
             "strategy": self.strategy,
             "opportunity_id": self.opportunity_id,
+            # Idempotency contract: Hummingbot MUST dedupe on this key so a
+            # retried/duplicated submission (e.g. response timeout after the
+            # order landed) cannot open a second position. opportunity_id is
+            # unique per approved opportunity, so it is the natural dedupe key.
+            "idempotency_key": self.opportunity_id,
             "min_hold_hours": self.min_hold_hours,
             "risk_params": self.risk_params,
             "metadata": {"confidence_score": self.confidence_score},
@@ -132,7 +137,10 @@ class HummingbotClient:
             request.risk_params.get("marginMode"),
             request.risk_params.get("leverage"),
         )
-        response = httpx.post(url, json=request.to_payload(), headers=self._headers(), timeout=15.0)
+        # Send the idempotency key as a header too, so an idempotency-aware
+        # gateway can dedupe even before the body is parsed.
+        headers = {**self._headers(), "Idempotency-Key": request.opportunity_id}
+        response = httpx.post(url, json=request.to_payload(), headers=headers, timeout=15.0)
         response.raise_for_status()
         return response.json()
 

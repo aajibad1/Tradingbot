@@ -23,7 +23,11 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TypedDict
+import time
+from typing import TYPE_CHECKING, TypedDict
+
+if TYPE_CHECKING:
+    from redis import Redis
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +126,30 @@ def taker_fee_bps(exchange: str) -> float:
     return EXCHANGE_TAKER_FEE_BPS[exchange.lower()]
 
 
+# --- Hot-path caching for the dynamic threshold ----------------------------
+# The opportunity-engine resolves the viability threshold once per eval cycle
+# AND inside score() per candidate, so a naive implementation opened a fresh
+# Redis client and did a network round-trip many times per second. We pool the
+# client per URL and memoise the resolved value for a sub-second window — the
+# threshold is only rewritten by the fee-tier job (~24h cadence), so this is
+# imperceptibly stale yet collapses the per-cycle/per-candidate reads to ~one
+# round-trip.
+_DYNAMIC_EDGE_CACHE_TTL_S = 1.0
+_pooled_clients: dict[str, Redis] = {}
+_cached_threshold: float | None = None
+_cached_at: float = 0.0
+
+
+def _pooled_client(url: str) -> Redis:
+    client = _pooled_clients.get(url)
+    if client is None:
+        from redis import Redis  # local import to keep test envs lightweight
+
+        client = Redis.from_url(url, decode_responses=True)
+        _pooled_clients[url] = client
+    return client
+
+
 def min_viable_net_edge_bps() -> float:
     """Resolve the current minimum net-edge threshold.
 
@@ -133,23 +161,29 @@ def min_viable_net_edge_bps() -> float:
     Never silently falls below the static default — if the Redis value is
     lower we still return the larger of the two. That preserves the
     invariant: dynamic-threshold updates can only TIGHTEN viability, never
-    loosen it.
+    loosen it. The Redis-backed value is cached for ``_DYNAMIC_EDGE_CACHE_TTL_S``
+    on a pooled connection to keep the opportunity-engine hot path I/O-cheap.
     """
+    global _cached_threshold, _cached_at
     redis_url = os.environ.get("REDIS_URL")
     if not redis_url:
+        # No Redis configured — always the static floor, never cached.
         return MIN_VIABLE_NET_EDGE_BPS
-    try:
-        from redis import Redis  # local import to keep test envs lightweight
 
-        client = Redis.from_url(redis_url, decode_responses=True)
-        raw = client.get(DYNAMIC_MIN_EDGE_REDIS_KEY)
-        if raw is None:
-            return MIN_VIABLE_NET_EDGE_BPS
-        dynamic = float(raw)
+    now = time.monotonic()
+    if _cached_threshold is not None and (now - _cached_at) < _DYNAMIC_EDGE_CACHE_TTL_S:
+        return _cached_threshold
+
+    try:
+        raw = _pooled_client(redis_url).get(DYNAMIC_MIN_EDGE_REDIS_KEY)
         # Tighten-only: never drop below the static floor.
-        return max(MIN_VIABLE_NET_EDGE_BPS, dynamic)
+        value = MIN_VIABLE_NET_EDGE_BPS if raw is None else max(MIN_VIABLE_NET_EDGE_BPS, float(raw))
     except Exception:
         # Redis transient blip or bad value — fall back to the static default
         # rather than blocking the hot path.
         logger.exception("dynamic min-edge lookup failed; falling back to static")
-        return MIN_VIABLE_NET_EDGE_BPS
+        value = MIN_VIABLE_NET_EDGE_BPS
+
+    _cached_threshold = value
+    _cached_at = now
+    return value

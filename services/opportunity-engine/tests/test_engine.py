@@ -205,10 +205,10 @@ def test_spot_perp_basis_below_threshold_not_viable() -> None:
 def test_funding_rate_arb_above_threshold_is_viable() -> None:
     snap = MarketSnapshot()
     snap.update_tick(_tick("kraken", "BTC", 60_000.0, 60_010.0))
-    # rate 0.005 per 8h period = 50 bps of funding payment counted twice
-    # (gross_spread_bps = |funding_bps|, then funding_bps added again in net).
-    # kraken 26 + hyperliquid 5 + 4 slip + 3 buffer = 38 → net ~62 bps > 50.
-    snap.update_funding(_funding("hyperliquid", "BTC", rate=0.005, apr_pct=55.0))
+    # rate 0.01 per period = 100 bps of funding payment, counted ONCE (the
+    # carry trade's only edge; gross_spread_bps is 0 for a delta-neutral carry).
+    # kraken 26 + hyperliquid 5 + ~4 slip + 3 buffer = 38 → net ~62 bps > 50.
+    snap.update_funding(_funding("hyperliquid", "BTC", rate=0.01, apr_pct=110.0))
 
     cands = list(FundingRateArbStrategy().evaluate(snap))
     assert cands

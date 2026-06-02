@@ -36,8 +36,14 @@ module "root" {
 }
 
 variable "project_id" {
-  type    = string
-  default = "agenuit"
+  description = <<-EOD
+    GCP project for the DEV environment. MUST be a different project from prod —
+    BigQuery datasets, Pub/Sub topics, and secrets are not env-suffixed, so a
+    shared project would let a dev apply clobber prod's data. Override with
+    -var project_id=... to match your actual dev project.
+  EOD
+  type        = string
+  default     = "agenuit-dev"
 }
 
 variable "region" {

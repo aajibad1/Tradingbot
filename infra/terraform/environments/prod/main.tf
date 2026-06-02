@@ -35,8 +35,12 @@ module "root" {
 }
 
 variable "project_id" {
-  type    = string
-  default = "agenuit"
+  description = <<-EOD
+    GCP project for the PROD environment. MUST be a different project from dev
+    (datasets/topics/secrets are not env-suffixed, so a shared project collides).
+  EOD
+  type        = string
+  default     = "agenuit"
 }
 
 variable "region" {

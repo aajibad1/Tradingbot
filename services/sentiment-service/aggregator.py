@@ -24,6 +24,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from models import SentimentSignal
+from shared.utils.log_redact import redact_secrets
 
 if TYPE_CHECKING:
     from clients.base import SentimentClient
@@ -62,7 +63,9 @@ async def _safe_fetch(client: SentimentClient):
     try:
         return await client.fetch()
     except Exception as e:  # noqa: BLE001 — fail-open on every source failure
-        logger.warning("sentiment source %s failed: %s", client.name, e)
+        # redact: httpx errors embed the request URL, which for CryptoPanic
+        # carries the auth_token query param.
+        logger.warning("sentiment source %s failed: %s", client.name, redact_secrets(str(e)))
         return None
 
 

@@ -103,7 +103,9 @@ class BaseCollector:
                 self._record_latency(int((time.time() - t0) * 1000))
                 tick = self._to_exchange_tick(symbol, ticker)
                 if tick is not None:
-                    self.publisher.publish(
+                    # Fire-and-forget: blocking on the publish future here would
+                    # stall this exchange's whole watch fan-out on every tick.
+                    self.publisher.publish_nowait(
                         Topic.MARKET_DATA,
                         tick,
                         attributes={"exchange": tick.exchange, "symbol": tick.symbol},

@@ -28,6 +28,7 @@ from approval_gate import (
     PendingApproval,
     decide,
     drain_approved,
+    kill_switch_active,
     submit_for_approval,
     sweep_expired,
     verify_slack_signature,
@@ -158,13 +159,43 @@ def tick() -> dict[str, Any]:
     spot exchange is unhealthy. Failovers are recorded in the response so
     operators can see them in the tick result.
     """
+    redis = _redis()
+
+    # The kill switch is the choke point for the LIVE path too. If risk-engine
+    # has locked the system down, do not drain or submit anything. Approved keys
+    # are left intact so they resume (or expire) once the switch clears.
+    # Sweeping expired pendings is still safe — it places no orders.
+    if kill_switch_active(redis):
+        expired = sweep_expired()
+        logger.warning(
+            "tick skipped — kill switch ACTIVE; no orders submitted (%d pending expired)",
+            expired,
+        )
+        return {
+            "submitted": [],
+            "failovers": [],
+            "expired": expired,
+            "kill_switch_active": True,
+            "tick_at": datetime.utcnow().isoformat(),
+        }
+
     expired = sweep_expired()
     submitted: list[str] = []
     failovers: list[dict[str, str]] = []
     client = HummingbotClient()
-    redis = _redis()
     bot_id = os.environ.get("HUMMINGBOT_BOT_ID", "arb-funding-rate")
     for pending in drain_approved():
+        # Defence-in-depth: re-check before every submission in case the switch
+        # trips mid-tick. drain_approved already atomically claimed the key, so
+        # this batch won't be re-submitted; we simply must not place a NEW order
+        # after a trip. Any already-claimed-but-unsent opps are dropped (safe on
+        # an emergency halt) and logged for operator follow-up.
+        if kill_switch_active(redis):
+            logger.critical(
+                "kill switch tripped mid-tick — aborting before opp=%s (already-claimed opp dropped)",
+                pending.opportunity_id,
+            )
+            break
         try:
             decision = route_for_execution(redis, pending.opportunity)
             if decision.failed_over:
@@ -183,6 +214,7 @@ def tick() -> dict[str, Any]:
         "submitted": submitted,
         "failovers": failovers,
         "expired": expired,
+        "kill_switch_active": False,
         "tick_at": datetime.utcnow().isoformat(),
     }
 

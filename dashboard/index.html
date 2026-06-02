@@ -147,7 +147,7 @@ canvas{max-height:180px}
   </div>
   <div class="header-right">
     <div class="time-badge" id="clockBadge">--:--:-- UTC</div>
-    <button class="kill-btn" onclick="triggerKillSwitch()">⚡ KILL SWITCH</button>
+    <button class="kill-btn" onclick="killSwitchRunbook()">⚡ KILL SWITCH</button>
   </div>
 </header>
 
@@ -624,59 +624,35 @@ async function updateAuditLog() {
 }
 
 // ── Kill Switch ───────────────────────────────────────────────────────────
-async function triggerKillSwitch() {
-  if (confirm('⚠️ TRIGGER KILL SWITCH?\n\nThis will immediately halt all trading activity and requires manual reset.\n\nProceed?')) {
-    const res = await fetchSafe(`${API_BASE.riskEngine}/kill-switch/trigger`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({triggered_by: 'dashboard-operator', reason: 'Manual kill switch from dashboard'})
-    });
-
-    if (res) {
-      state.killed = true;
-      const pill = document.getElementById('systemStatus');
-      pill.className = 'status-pill halted';
-      document.getElementById('statusLabel').textContent = 'KILL SWITCH ACTIVE';
-      const btn = document.querySelector('.kill-btn');
-      btn.textContent = '✅ RESET SYSTEM';
-      btn.style.background = 'rgba(63,185,80,0.12)';
-      btn.style.borderColor = 'rgba(63,185,80,0.3)';
-      btn.style.color = 'var(--color-success)';
-      btn.onclick = resetKillSwitch;
-
-      state.logs.unshift({time: new Date().toTimeString().slice(0, 8), type: 'warn', event: '⚡ KILL SWITCH TRIGGERED by operator — all trading halted'});
-      updateAuditLog();
-    } else {
-      alert('Failed to trigger kill switch. Risk engine may be unavailable.');
-    }
-  }
-}
-
-async function resetKillSwitch() {
-  const token = prompt('Enter kill switch reset token:');
-  if (!token) return;
-
-  if (confirm('Reset kill switch and resume paper trading?')) {
-    const res = await fetchSafe(`${API_BASE.riskEngine}/kill-switch/reset`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({auth_token: token, reset_by: 'dashboard-operator'})
-    });
-
-    if (res && !res.error) {
-      state.killed = false;
-      document.getElementById('systemStatus').className = 'status-pill paper';
-      document.getElementById('statusLabel').textContent = 'PAPER TRADING';
-      const btn = document.querySelector('.kill-btn');
-      btn.textContent = '⚡ KILL SWITCH';
-      btn.style.cssText = '';
-      btn.onclick = triggerKillSwitch;
-
-      state.logs.unshift({time: new Date().toTimeString().slice(0, 8), type: 'ok', event: 'Kill switch reset — system resumed paper trading'});
-      updateAuditLog();
-    } else {
-      alert('Failed to reset kill switch. Check token and try again.');
-    }
+// SECURITY: the kill switch is mutated ONLY on the risk-engine, which is an
+// internal, IAM-protected, token-gated service — never from this public,
+// unauthenticated dashboard. Issuing a trigger from a public endpoint would be
+// a DoS vector, and the reset token must never transit the browser. The
+// dashboard reflects kill-switch STATE (see updateSystemStatus, driven by
+// /api/summary) and surfaces the authenticated operator procedure here.
+function killSwitchRunbook() {
+  if (state.killed) {
+    alert(
+      '🔴 KILL SWITCH IS ACTIVE — all trading is halted.\n\n' +
+      'RESET is an authenticated operator action (not available from this dashboard):\n\n' +
+      '  curl -X POST <risk-engine-url>/kill-switch/reset \\\n' +
+      '    -H "Authorization: Bearer $(gcloud auth print-identity-token)" \\\n' +
+      '    -H "Content-Type: application/json" \\\n' +
+      '    -d \'{"auth_token":"<KILL_SWITCH_RESET_TOKEN>","reset_by":"<operator>"}\'\n\n' +
+      'The reset token lives in Secret Manager (out-of-band) — never enter it here.'
+    );
+  } else {
+    alert(
+      '⚠️ EMERGENCY HALT is an authenticated operator action.\n\n' +
+      'risk-engine is internal/IAM-protected; halting from this public dashboard is\n' +
+      'intentionally disabled (a public trigger would be a denial-of-service vector).\n' +
+      'The status pill above reflects the live kill-switch state.\n\n' +
+      'To halt:\n' +
+      '  curl -X POST <risk-engine-url>/kill-switch/trigger \\\n' +
+      '    -H "Authorization: Bearer $(gcloud auth print-identity-token)" \\\n' +
+      '    -H "Content-Type: application/json" \\\n' +
+      '    -d \'{"triggered_by":"<operator>","reason":"manual halt"}\''
+    );
   }
 }
 

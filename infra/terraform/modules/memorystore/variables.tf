@@ -34,3 +34,15 @@ variable "labels" {
   type    = map(string)
   default = {}
 }
+
+variable "auth_enabled" {
+  description = "Require an AUTH string to connect (defence-in-depth on the VPC)."
+  type        = bool
+  default     = true
+}
+
+variable "transit_encryption_mode" {
+  description = "In-transit encryption mode. SERVER_AUTHENTICATION enables TLS."
+  type        = string
+  default     = "SERVER_AUTHENTICATION"
+}

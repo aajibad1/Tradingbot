@@ -101,8 +101,15 @@ class FundingRateArbStrategy(Strategy):
                     long_ex, short_ex = funding.exchange, best_spot.exchange
                     funding_bps_per_period = -funding.rate_per_period * 10_000.0
 
-                # Gross spread is the per-period funding payment, in bps of notional.
-                gross_bps = abs(funding_bps_per_period)
+                # Delta-neutral carry: the ENTIRE edge is the per-period funding
+                # payment, supplied once below via ``funding_rate_bps_per_period``.
+                # A pure carry trade has no price-convergence ("gross spread")
+                # component, so gross spread is 0. Putting the funding value into
+                # BOTH gross_spread_bps and funding_rate_bps_per_period would make
+                # calculate_net_edge (gross + funding - costs) count it twice, which
+                # roughly doubles the apparent edge and also makes the paper-trader
+                # book a phantom convergence gain on top of accrued funding.
+                gross_bps = 0.0
                 # Confidence scales with funding APR magnitude, capped at 1.0
                 conf = min(1.0, abs(funding.annualized_pct) / 30.0)
                 if funding.annualized_pct < 0:

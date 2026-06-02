@@ -37,7 +37,7 @@ locals {
     environment = var.environment
   })
 
-  # Mirrors shared/pubsub/publisher.py:Topic
+  # Mirrors shared/pubsub/publisher.py:Topic — must stay 1:1 with the enum.
   topics = [
     "arb-market-data",
     "arb-funding-rates",
@@ -46,20 +46,26 @@ locals {
     "arb-trade-fills",
     "arb-ai-proposals",
     "arb-audit-log",
+    # Provisioned ahead of its consumer so a publish to Topic.SENTIMENT_EVENTS
+    # can never 404. The trade-ledger sentiment-history stream is still TODO,
+    # hence no subscription below yet.
+    "arb-sentiment-events",
   ]
 
   # Subscription convention: <topic>-<consumer-service>
   subscriptions = {
-    "arb-market-data-opp-engine"    = "arb-market-data"
-    "arb-funding-rates-opp-engine"  = "arb-funding-rates"
-    "arb-opportunities-risk-engine" = "arb-opportunities"
-    "arb-opportunities-ledger"      = "arb-opportunities"
-    "arb-risk-alerts-ledger"        = "arb-risk-alerts"
-    "arb-risk-alerts-ai-ops"        = "arb-risk-alerts"
-    "arb-trade-fills-ledger"        = "arb-trade-fills"
-    "arb-trade-fills-paper-trader"  = "arb-trade-fills"
-    "arb-ai-proposals-ledger"       = "arb-ai-proposals"
-    "arb-audit-log-ledger"          = "arb-audit-log"
+    "arb-market-data-opp-engine"     = "arb-market-data"
+    "arb-funding-rates-opp-engine"   = "arb-funding-rates"
+    "arb-opportunities-risk-engine"  = "arb-opportunities"
+    "arb-opportunities-ledger"       = "arb-opportunities"
+    "arb-opportunities-paper-trader" = "arb-opportunities"
+    "arb-opportunities-orchestrator" = "arb-opportunities"
+    "arb-risk-alerts-ledger"         = "arb-risk-alerts"
+    "arb-risk-alerts-ai-ops"         = "arb-risk-alerts"
+    "arb-trade-fills-ledger"         = "arb-trade-fills"
+    "arb-trade-fills-risk-engine"    = "arb-trade-fills"
+    "arb-ai-proposals-ledger"        = "arb-ai-proposals"
+    "arb-audit-log-ledger"           = "arb-audit-log"
   }
 
   # BigQuery datasets — table-expiration rules:
@@ -109,13 +115,17 @@ locals {
     "risk-engine" = {
       secrets        = ["KILL_SWITCH_RESET_TOKEN"]
       publish_topics = ["arb-risk-alerts", "arb-audit-log"]
-      subscribe_subs = ["arb-opportunities-risk-engine"]
+      # Subscribes to trade fills to maintain risk:* state (daily PnL, exposure,
+      # concentration) so the drawdown/position-limit backstops have live data.
+      subscribe_subs = ["arb-opportunities-risk-engine", "arb-trade-fills-risk-engine"]
       cpu_idle       = false
     }
     "paper-trader" = {
       secrets        = []
       publish_topics = ["arb-trade-fills", "arb-audit-log"]
-      subscribe_subs = ["arb-trade-fills-paper-trader"]
+      # Consumes APPROVED opportunities to simulate (was wired to its own output
+      # topic arb-trade-fills — backwards; paper-trader's code subscribes here).
+      subscribe_subs = ["arb-opportunities-paper-trader"]
       cpu_idle       = true
     }
     "trade-ledger" = {
@@ -139,7 +149,9 @@ locals {
     "execution-orchestrator" = {
       secrets        = ["COINBASE_API_KEY", "KRAKEN_API_KEY", "KRAKEN_SECRET", "CRYPTOCOM_API_KEY", "BINANCE_US_KEY", "HYPERLIQUID_KEY"]
       publish_topics = ["arb-trade-fills", "arb-audit-log"]
-      subscribe_subs = []
+      # Consumes approved opportunities to route through human approval → Hummingbot
+      # (its code subscribes to arb-opportunities-orchestrator; was missing here).
+      subscribe_subs = ["arb-opportunities-orchestrator"]
       cpu_idle       = false
     }
     # Sentiment-service — Cloud Scheduler hits POST /sentiment/refresh every
@@ -318,7 +330,11 @@ module "cloud_run" {
   env_vars = {
     GCP_PROJECT_ID = var.project_id
     ENVIRONMENT    = var.environment
-    REDIS_URL      = "redis://${module.memorystore.host}:${module.memorystore.port}/0"
+    # rediss:// (TLS) + AUTH string — redis-py's from_url handles both natively.
+    # ssl_cert_reqs=none encrypts in transit without shipping Memorystore's
+    # self-signed CA into every image; pin the CA (module.memorystore.server_ca_certs)
+    # for full verification as a follow-up.
+    REDIS_URL = "rediss://:${module.memorystore.auth_string}@${module.memorystore.host}:${module.memorystore.port}/0?ssl_cert_reqs=none"
   }
   labels = local.common_labels
 
@@ -371,6 +387,51 @@ resource "google_cloud_scheduler_job" "sentiment_refresh" {
   }
 
   depends_on = [google_cloud_run_service_iam_member.sentiment_invoker]
+}
+
+# ---------------------------------------------------------------------------
+# Cloud Scheduler — resets risk:daily_pnl_usd at UTC midnight so the drawdown
+# guard's daily-loss window rolls over. Without this the daily PnL accumulates
+# forever and the daily-loss limit would eventually trip on lifetime losses.
+# OIDC-authenticated so risk-engine stays --no-allow-unauthenticated.
+# ---------------------------------------------------------------------------
+resource "google_service_account" "risk_reset_scheduler" {
+  account_id   = "risk-reset-scheduler-${var.environment}"
+  display_name = "Cloud Scheduler invoker for risk-engine daily reset"
+  project      = var.project_id
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_cloud_run_service_iam_member" "risk_reset_invoker" {
+  project  = var.project_id
+  location = var.region
+  service  = "risk-engine"
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.risk_reset_scheduler.email}"
+
+  depends_on = [module.cloud_run]
+}
+
+resource "google_cloud_scheduler_job" "risk_daily_reset" {
+  name        = "risk-daily-pnl-reset-${var.environment}"
+  description = "Reset risk:daily_pnl_usd at UTC midnight (drawdown-window rollover)."
+  schedule    = "0 0 * * *"
+  time_zone   = "Etc/UTC"
+  project     = var.project_id
+  region      = var.region
+
+  http_target {
+    http_method = "POST"
+    uri         = "${module.cloud_run["risk-engine"].service_url}/positions/reset-daily"
+
+    oidc_token {
+      service_account_email = google_service_account.risk_reset_scheduler.email
+      audience              = module.cloud_run["risk-engine"].service_url
+    }
+  }
+
+  depends_on = [google_cloud_run_service_iam_member.risk_reset_invoker]
 }
 
 # ---------------------------------------------------------------------------

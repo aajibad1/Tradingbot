@@ -30,17 +30,22 @@ Evaluation order (canonical — see CLAUDE.md "risk-engine is the choke point"):
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
+import position_tracker
 from models import (
     EvaluateRequest,
     EvaluateResponse,
     KillSwitchResetRequest,
     KillSwitchTriggerRequest,
 )
+from shared.models.trade import Trade
 from rules.capital_validator import validate_capital
 from rules.drawdown_guard import DEFAULT_LIMITS, check_drawdown
 from rules.exchange_health import check_exchange_health
@@ -52,7 +57,7 @@ from rules.kill_switch import (
 from rules.liquidation_monitor import check_liquidations, scan as scan_liquidations
 from rules.position_limits import check_position_limits
 from rules.sentiment_gate import check_sentiment
-from state import get_redis, load_state
+from state import get_redis, load_state, reset_daily_pnl
 
 logging.basicConfig(
     level=logging.INFO,
@@ -60,7 +65,59 @@ logging.basicConfig(
 )
 logger = logging.getLogger("risk-engine")
 
-app = FastAPI(title="risk-engine", version="0.1.0")
+
+_subscriber_client = None
+_subscriber_futures: list = []
+
+
+def _on_trade_fill(message) -> None:
+    """Fold an inbound Trade fill into the Redis risk state."""
+    try:
+        trade = Trade.model_validate_json(message.data)
+        position_tracker.apply_trade(get_redis(), trade)
+        message.ack()
+    except Exception:
+        logger.exception("failed to apply trade fill to risk state")
+        message.nack()
+
+
+def _start_subscribers() -> None:
+    """Subscribe to arb-trade-fills so risk state tracks realized PnL/exposure.
+
+    Skipped without GCP_PROJECT_ID (local mode) — drive state via the
+    POST /positions/apply-fill endpoint instead, matching the repo convention.
+    """
+    global _subscriber_client
+    project_id = os.environ.get("GCP_PROJECT_ID")
+    if not project_id:
+        logger.warning("GCP_PROJECT_ID unset — risk-engine running without trade-fill subscriber")
+        return
+    from google.cloud import pubsub_v1
+
+    _subscriber_client = pubsub_v1.SubscriberClient()
+    sub = os.environ.get("TRADE_FILLS_SUBSCRIPTION", "arb-trade-fills-risk-engine")
+    path = _subscriber_client.subscription_path(project_id, sub)
+    _subscriber_futures.append(_subscriber_client.subscribe(path, callback=_on_trade_fill))
+    logger.info("subscribed: %s", path)
+
+
+def _stop_subscribers() -> None:
+    for f in _subscriber_futures:
+        f.cancel()
+    if _subscriber_client is not None:
+        _subscriber_client.close()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _start_subscribers()
+    try:
+        yield
+    finally:
+        _stop_subscribers()
+
+
+app = FastAPI(title="risk-engine", version="0.1.0", lifespan=lifespan)
 
 
 @app.get("/healthz")
@@ -234,3 +291,29 @@ def reset(req: KillSwitchResetRequest) -> dict:
 def admin_reset(req: KillSwitchResetRequest) -> dict:
     """Alias of /kill-switch/reset — matches spec "POST /admin/reset"."""
     return reset(req)
+
+
+@app.post("/positions/apply-fill")
+def apply_fill(trade: Trade) -> dict:
+    """Fold a Trade fill into the risk state.
+
+    Same code path as the arb-trade-fills subscriber — exposed so local/dev
+    runs (and tests) can drive risk state without Pub/Sub, and so ops can
+    replay a fill manually if needed.
+    """
+    redis = get_redis()
+    position_tracker.apply_trade(redis, trade)
+    return load_state(redis).model_dump(mode="json")
+
+
+@app.post("/positions/reset-daily")
+def positions_reset_daily() -> dict:
+    """Reset risk:daily_pnl_usd to 0 — intended for a UTC-midnight scheduler.
+
+    Without a periodic reset the drawdown guard's daily-loss window would
+    accumulate forever. The Cloud Scheduler job that calls this is defined in
+    infra (see deploy notes).
+    """
+    redis = get_redis()
+    reset_daily_pnl(redis)
+    return load_state(redis).model_dump(mode="json")

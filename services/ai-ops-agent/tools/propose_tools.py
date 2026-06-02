@@ -19,9 +19,28 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from permissions import ToolBlockedError
 from shared.pubsub.publisher import Topic, get_publisher
 
 logger = logging.getLogger(__name__)
+
+
+# Risk-engine limit keys an AI agent may PROPOSE to change. Mirrors the mutable
+# entries of DEFAULT_LIMITS in services/risk-engine/rules/drawdown_guard.py.
+# Leverage and any withdrawal-adjacent control are DELIBERATELY excluded — a
+# leverage increase is a NEVER-tier action (see permissions.py) and must not be
+# reachable by laundering it through a risk-limit-change proposal. Validating the
+# rule at proposal time is defence-in-depth; the human Slack gate is the primary
+# control but must not be the ONLY one.
+_PROPOSABLE_RISK_RULES: dict[str, float] = {
+    # rule name -> hard upper bound a proposal may request (sanity ceiling)
+    "max_daily_loss_pct": 10.0,
+    "max_per_trade_capital_pct": 10.0,
+    "max_exchange_exposure_pct": 50.0,
+    "max_single_asset_exposure_pct": 50.0,
+    "min_net_edge_bps": 1000.0,
+    "max_api_latency_ms": 5000.0,
+}
 
 
 class Proposal(BaseModel):
@@ -74,11 +93,28 @@ def _publish(proposal: Proposal) -> dict[str, str]:
 
 
 def propose_risk_limit_change(rule: str, new_value: float, rationale: str) -> dict[str, str]:
-    """Propose a change to a single risk-engine limit (e.g. max_daily_loss_pct)."""
+    """Propose a change to a single risk-engine limit (e.g. max_daily_loss_pct).
+
+    Only the allowlisted mutable limits may be proposed. Leverage- and
+    withdrawal-adjacent rules are blocked here (not merely at the downstream
+    approval gate) so a NEVER-tier action cannot be smuggled through this tool.
+    """
+    rule_norm = rule.strip().lower()
+    max_allowed = _PROPOSABLE_RISK_RULES.get(rule_norm)
+    if max_allowed is None:
+        raise ToolBlockedError(
+            f"risk rule {rule!r} is not proposable by an AI agent "
+            f"(allowed: {sorted(_PROPOSABLE_RISK_RULES)}); "
+            "leverage / withdrawal changes are NEVER-tier"
+        )
+    if not (0 < new_value <= max_allowed):
+        raise ValueError(
+            f"new_value {new_value} out of bounds for {rule_norm} — must be in (0, {max_allowed}]"
+        )
     proposal = Proposal(
         proposal_id=str(uuid.uuid4()),
         type="risk_limit_change",
-        payload={"rule": rule, "new_value": new_value},
+        payload={"rule": rule_norm, "new_value": new_value},
         rationale=rationale,
         proposed_at=datetime.now(timezone.utc),
     )

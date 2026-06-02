@@ -42,6 +42,25 @@ KEY_PREFIX_APPROVED = "approval:approved:"
 KEY_PREFIX_REJECTED = "approval:rejected:"
 DEFAULT_APPROVAL_TIMEOUT_S = 600  # 10 minutes
 
+# Risk-engine owns this key — see services/risk-engine/state.py for the Redis
+# contract. The orchestrator is a read-only consumer: a tripped kill switch
+# must halt the live execution path (CLAUDE.md: "risk-engine is the choke point").
+KEY_KILL_SWITCH_ACTIVE = "risk:kill_switch:active"
+
+
+def kill_switch_active(redis: Redis) -> bool:
+    """True iff the risk-engine kill switch is engaged.
+
+    Fails SAFE: if Redis is unreachable or returns an unexpected value we treat
+    the switch as active, so an unavailable risk-state store can never let live
+    orders slip through the gate.
+    """
+    try:
+        return redis.get(KEY_KILL_SWITCH_ACTIVE) == "1"
+    except Exception:  # noqa: BLE001 — money path must fail closed
+        logger.exception("kill-switch check failed — failing safe (treating as ACTIVE)")
+        return True
+
 
 class ApprovalStatus(str, Enum):
     PENDING = "pending"
@@ -117,16 +136,21 @@ def decide(opportunity_id: str, status: ApprovalStatus, decided_by: str) -> Pend
 
 
 def drain_approved(limit: int = 50) -> list[PendingApproval]:
-    """Pop approved opportunities for execution. Removes them from the approved set."""
+    """Pop approved opportunities for execution. Removes them from the approved set.
+
+    Each key is claimed with an atomic ``GETDEL`` rather than a separate
+    get-then-delete. Two concurrent ticks (overlapping cron pings, or a cron
+    tick racing a manual call) can therefore never both read the same approved
+    opportunity and submit it twice — the loser of the race gets ``None`` from
+    ``getdel`` and skips it. ``GETDEL`` requires Redis >= 6.2 (Memorystore ok).
+    """
     redis = _redis()
     out: list[PendingApproval] = []
     for key in redis.scan_iter(match=f"{KEY_PREFIX_APPROVED}*"):
-        raw = redis.get(key)
+        raw = redis.getdel(key)  # atomic claim — closes the double-execution window
         if not raw:
             continue
-        pending = PendingApproval.model_validate_json(raw)
-        redis.delete(key)
-        out.append(pending)
+        out.append(PendingApproval.model_validate_json(raw))
         if len(out) >= limit:
             break
     return out

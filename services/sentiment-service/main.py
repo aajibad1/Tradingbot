@@ -109,12 +109,16 @@ def status() -> HealthResponse:
 async def refresh() -> RefreshResponse:
     """Run a refresh cycle now. Writes sentiment:* keys to Redis."""
     fg, px, cp = _build_clients()
-    if fg is None and px is None and cp is None:
+    # Fear & Greed is keyless and therefore always available, but it is too
+    # coarse to gate trading on alone. Require at least one *keyed* source
+    # (Perplexity or CryptoPanic); otherwise refuse the refresh rather than
+    # write a single-source signal the risk-engine would gate on.
+    if px is None and cp is None:
         raise HTTPException(
             status_code=503,
             detail=(
                 "no sentiment sources configured — set PERPLEXITY_API_KEY and/or "
-                "CRYPTOPANIC_API_KEY (Fear & Greed needs no key)"
+                "CRYPTOPANIC_API_KEY (Fear & Greed alone is insufficient)"
             ),
         )
 
