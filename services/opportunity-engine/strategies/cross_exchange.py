@@ -64,6 +64,8 @@ class CrossExchangeStrategy(Strategy):
                     gross_spread_bps=gross_bps,
                     slippage_long_bps=slip_bps,
                     slippage_short_bps=slip_bps,
+                    long_reference_price=buy_at.ask,    # we buy the long leg at the ask
+                    short_reference_price=sell_at.bid,  # we sell the short leg at the bid
                     recommended_size_usd=_DEFAULT_SIZE_USD,
                     min_hold_hours=0.5,  # spreads close fast on this strategy
                     confidence_score=_confidence(gross_bps),

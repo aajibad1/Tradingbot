@@ -171,6 +171,10 @@ class FundingRateArbStrategy(Strategy):
                         funding_periods=funding_periods,
                         funding_persistence=persistence,
                         funding_rate_annualized_pct=funding.annualized_pct,
+                        # Carry legs are the same asset at ~the same price; the spot
+                        # ask is the best available reference for both legs.
+                        long_reference_price=best_spot.ask,
+                        short_reference_price=best_spot.ask,
                         recommended_size_usd=_DEFAULT_SIZE_USD,
                         min_hold_hours=hold_hours,
                         confidence_score=conf,

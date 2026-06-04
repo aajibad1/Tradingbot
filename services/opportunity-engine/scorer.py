@@ -45,6 +45,8 @@ class ScoredCandidate:
     recommended_size_usd: float = 10_000.0
     min_hold_hours: float = 4.0
     confidence_score: float = 0.5
+    long_reference_price: float | None = None   # real prices at detection
+    short_reference_price: float | None = None
 
 
 def score(candidate: ScoredCandidate, now: datetime | None = None) -> Opportunity:
@@ -85,4 +87,6 @@ def score(candidate: ScoredCandidate, now: datetime | None = None) -> Opportunit
         detected_at=now or datetime.utcnow(),
         execute=False,  # Set True only after risk-engine approves
         rejection_reason=rejection,
+        long_reference_price=candidate.long_reference_price,
+        short_reference_price=candidate.short_reference_price,
     )

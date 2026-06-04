@@ -65,12 +65,14 @@ class SpotPerpBasisStrategy(Strategy):
                     if basis_bps > 0:
                         # Perp expensive → long spot, short perp.
                         long_ex, short_ex = spot.exchange, perp.exchange
+                        long_price, short_price = spot.ask, perp.bid
                         # Short perp collects positive funding when funding > 0.
                         funding_bps_per_period = (
                             funding.rate_per_period * 10_000.0 if funding else 0.0
                         )
                     else:
                         long_ex, short_ex = perp.exchange, spot.exchange
+                        long_price, short_price = perp.ask, spot.bid
                         # Long perp pays positive funding — sign flips.
                         funding_bps_per_period = (
                             -funding.rate_per_period * 10_000.0 if funding else 0.0
@@ -85,6 +87,8 @@ class SpotPerpBasisStrategy(Strategy):
                             gross_spread_bps=abs(basis_bps),
                             slippage_long_bps=slip_bps,
                             slippage_short_bps=slip_bps,
+                            long_reference_price=long_price,
+                            short_reference_price=short_price,
                             funding_rate_bps_per_period=funding_bps_per_period,
                             funding_rate_annualized_pct=funding_apr,
                             recommended_size_usd=_DEFAULT_SIZE_USD,
