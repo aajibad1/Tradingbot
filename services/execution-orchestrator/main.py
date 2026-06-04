@@ -26,6 +26,8 @@ from approval_gate import (
     ApprovalStatus,
     KEY_PREFIX_PENDING,
     PendingApproval,
+    approval_required,
+    auto_approve,
     decide,
     drain_approved,
     kill_switch_active,
@@ -53,7 +55,12 @@ def _on_opportunity(message) -> None:
             # Risk-engine has not approved this one — drop silently.
             message.ack()
             return
-        submit_for_approval(opp)
+        # Supervised-execution gate (H6): require human Slack approval during the
+        # first N days of live trading (and always, unless autonomous is opted in).
+        if approval_required():
+            submit_for_approval(opp)
+        else:
+            auto_approve(opp)
         message.ack()
     except Exception:
         logger.exception("failed to process opportunity")

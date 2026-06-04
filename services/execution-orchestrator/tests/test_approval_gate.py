@@ -18,6 +18,8 @@ from approval_gate import (
     KEY_PREFIX_APPROVED,
     ApprovalStatus,
     PendingApproval,
+    approval_required,
+    auto_approve,
     drain_approved,
     kill_switch_active,
 )
@@ -134,3 +136,42 @@ def test_drain_claims_each_key_at_most_once(monkeypatch: pytest.MonkeyPatch) -> 
     second = drain_approved()
     claimed = [p.opportunity_id for p in first + second]
     assert claimed == ["opp-shared"]  # claimed once, not twice
+
+
+# ── H6: supervised-execution gate ────────────────────────────────────────────
+
+
+def test_approval_required_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ENABLE_AUTONOMOUS_EXECUTION", raising=False)
+    assert approval_required() is True  # safe default: always human-approve
+
+
+def test_approval_required_when_autonomous_but_no_live_date(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENABLE_AUTONOMOUS_EXECUTION", "true")
+    monkeypatch.delenv("LIVE_SINCE", raising=False)
+    assert approval_required() is True  # opted in but no go-live date → stay safe
+
+
+def test_approval_required_within_supervised_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENABLE_AUTONOMOUS_EXECUTION", "true")
+    monkeypatch.setenv("LIVE_SINCE", datetime(2026, 6, 1).isoformat())
+    monkeypatch.setenv("APPROVAL_REQUIRED_DAYS", "14")
+    # 5 days into live trading → still supervised
+    assert approval_required(now=datetime(2026, 6, 6)) is True
+
+
+def test_no_approval_after_window_when_autonomous(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENABLE_AUTONOMOUS_EXECUTION", "true")
+    monkeypatch.setenv("LIVE_SINCE", datetime(2026, 6, 1).isoformat())
+    monkeypatch.setenv("APPROVAL_REQUIRED_DAYS", "14")
+    # 19 days in, autonomous opted in → no human approval needed
+    assert approval_required(now=datetime(2026, 6, 20)) is False
+
+
+def test_auto_approve_writes_approved_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    r = _FakeRedis()
+    monkeypatch.setattr(approval_gate, "_redis", lambda: r)
+    pending = auto_approve(_opp("opp-auto"))
+    assert pending.status is ApprovalStatus.APPROVED
+    assert pending.decided_by == "auto-execution"
+    assert f"{KEY_PREFIX_APPROVED}opp-auto" in r.kv
