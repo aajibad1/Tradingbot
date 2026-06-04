@@ -16,6 +16,7 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
+from shared.models.exchange_tick import ExchangeTick
 from shared.models.funding_rate import FundingRate
 from shared.models.opportunity import Opportunity
 from shared.models.trade import Trade
@@ -46,6 +47,18 @@ def _stream(table_id: str, row: dict) -> None:
     errors = client.insert_rows_json(table_id, [row])
     if errors:
         logger.error("bigquery insert errors %s: %s", table_id, errors)
+
+
+def _stream_many(table_id: str, rows: list[dict]) -> None:
+    """Batch streaming insert. Best-effort (logs, never raises) — used for the
+    high-volume, lossy-tolerant tick stream, NOT the audit-critical tables."""
+    if not rows:
+        return
+    client = _client()
+    errors = client.insert_rows_json(table_id, rows)
+    if errors:
+        logger.error("bigquery tick insert errors %s: %d rows, first=%s",
+                     table_id, len(rows), errors[:1])
 
 
 def trade_to_row(trade: Trade) -> dict:
@@ -148,6 +161,26 @@ def audit_log_to_row(payload: dict) -> dict:
         "metadata": payload.get("metadata"),
         "emitted_at": payload["emitted_at"],
     }
+
+
+def tick_to_row(tick: ExchangeTick) -> dict:
+    return {
+        "exchange": tick.exchange,
+        "symbol": tick.symbol,
+        "asset": tick.asset,
+        "bid": tick.bid,
+        "ask": tick.ask,
+        "bid_size": tick.bid_size,
+        "ask_size": tick.ask_size,
+        "last": tick.last,
+        "instrument_type": tick.instrument_type,
+        "observed_at": tick.timestamp.isoformat(),
+    }
+
+
+def write_ticks(rows: list[dict]) -> None:
+    """Batch-write downsampled ticks to arb_market_data.ticks (best-effort)."""
+    _stream_many(_table("arb_market_data", "ticks"), rows)
 
 
 def write_trade(trade: Trade) -> None:

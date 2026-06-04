@@ -25,9 +25,11 @@ from writer import (
     funding_to_row,
     opportunity_to_row,
     risk_alert_to_row,
+    tick_to_row,
     trade_to_row,
 )
 
+from shared.models.exchange_tick import ExchangeTick
 from shared.models.funding_rate import FundingRate
 from shared.models.opportunity import Opportunity, StrategyType
 from shared.models.trade import Trade, TradeLeg, TradeStatus, TradeType
@@ -142,12 +144,20 @@ def _audit_row() -> dict:
     })
 
 
+def _tick_row() -> dict:
+    return tick_to_row(ExchangeTick(
+        exchange="kraken", symbol="BTC/USD", asset="BTC", bid=60_000.0, ask=60_010.0,
+        bid_size=1.0, ask_size=1.0, timestamp=datetime(2026, 1, 1),
+    ))
+
+
 _CASES = {
     "trades.sql": _trade_row,
     "opportunities.sql": _opportunity_row,
     "funding_events.sql": _funding_row,
     "risk_events.sql": _risk_event_row,
     "audit_log.sql": _audit_row,
+    "ticks.sql": _tick_row,
 }
 
 

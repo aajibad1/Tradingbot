@@ -6,6 +6,7 @@ Subscribes to:
   arb-funding-rates    → arb_trading.funding_events
   arb-risk-alerts      → arb_risk.risk_events
   arb-audit-log        → arb_audit.audit_log
+  arb-market-data      → arb_market_data.ticks   (opt-in; ENABLE_TICK_COLLECTION)
 
 Exposes:
   GET /healthz
@@ -25,10 +26,12 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import Response
 
 import writer
+from shared.models.exchange_tick import ExchangeTick
 from shared.models.funding_rate import FundingRate
 from shared.models.opportunity import Opportunity
 from shared.models.trade import Trade
 from tax_export import export_funding_income_year, export_year
+from tick_collector import TickBuffer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("trade-ledger")
@@ -36,6 +39,11 @@ logger = logging.getLogger("trade-ledger")
 
 _subscriber_client = None
 _futures: list = []
+_tick_buffer: TickBuffer | None = None
+
+
+def _tick_collection_enabled() -> bool:
+    return os.environ.get("ENABLE_TICK_COLLECTION", "false").lower() == "true"
 
 
 def _start_subscribers() -> None:
@@ -54,6 +62,14 @@ def _start_subscribers() -> None:
     _subscribe(project_id, "arb-funding-rates-ledger", _on_funding)
     _subscribe(project_id, "arb-risk-alerts-ledger", _on_risk_alert)
     _subscribe(project_id, "arb-audit-log-ledger", _on_audit_log)
+
+    # Forward tick collection (opt-in) — high-volume, downsampled + batched,
+    # best-effort. Off by default so it never adds BigQuery cost unexpectedly.
+    if _tick_collection_enabled():
+        global _tick_buffer
+        _tick_buffer = TickBuffer(writer.write_ticks)
+        _subscribe(project_id, "arb-market-data-ledger", _on_tick)
+        logger.info("tick collection ENABLED → arb_market_data.ticks")
 
 
 def _subscribe(project_id: str, subscription_id: str, callback) -> None:
@@ -114,11 +130,27 @@ def _on_audit_log(message) -> None:
         message.nack()
 
 
+def _on_tick(message) -> None:
+    """Buffer a tick for batched persistence. Best-effort: always ack (ticks are
+    high-volume and lossy-tolerant — never nack/redeliver them)."""
+    import time
+    try:
+        if _tick_buffer is not None:
+            _tick_buffer.add(ExchangeTick(**json.loads(message.data.decode("utf-8"))), time.time())
+    except Exception:
+        logger.exception("failed to buffer tick")
+    finally:
+        message.ack()
+
+
 def _stop_subscribers() -> None:
     for f in _futures:
         f.cancel()
     if _subscriber_client is not None:
         _subscriber_client.close()
+    if _tick_buffer is not None:
+        import time
+        _tick_buffer.flush(time.time())  # persist any buffered ticks on shutdown
 
 
 @asynccontextmanager

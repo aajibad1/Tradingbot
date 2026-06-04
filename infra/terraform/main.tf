@@ -62,6 +62,7 @@ locals {
     "arb-opportunities-orchestrator" = "arb-opportunities"
     "arb-risk-alerts-ledger"         = "arb-risk-alerts"
     "arb-risk-alerts-ai-ops"         = "arb-risk-alerts"
+    "arb-market-data-ledger"         = "arb-market-data"
     "arb-trade-fills-ledger"         = "arb-trade-fills"
     "arb-trade-fills-risk-engine"    = "arb-trade-fills"
     "arb-ai-proposals-ledger"        = "arb-ai-proposals"
@@ -137,8 +138,12 @@ locals {
         "arb-risk-alerts-ledger",
         "arb-audit-log-ledger",
         "arb-ai-proposals-ledger",
+        # Forward tick collection → arb_market_data.ticks (gated by env below).
+        "arb-market-data-ledger",
       ]
       cpu_idle = true
+      # Opt-in tick persistence for cross-exchange backtesting (downsampled + batched).
+      env = { ENABLE_TICK_COLLECTION = "true" }
     }
     "ai-ops-agent" = {
       secrets        = ["ANTHROPIC_API_KEY", "GEMINI_API_KEY", "SLACK_WEBHOOK_URL"]
@@ -327,7 +332,7 @@ module "cloud_run" {
   secrets             = each.value.secrets
   allow_public_invoke = lookup(each.value, "allow_public_invoke", false)
   bigquery_reader     = lookup(each.value, "bigquery_reader", false)
-  env_vars = {
+  env_vars = merge({
     GCP_PROJECT_ID = var.project_id
     ENVIRONMENT    = var.environment
     # rediss:// (TLS) + AUTH string — redis-py's from_url handles both natively.
@@ -335,7 +340,7 @@ module "cloud_run" {
     # self-signed CA into every image; pin the CA (module.memorystore.server_ca_certs)
     # for full verification as a follow-up.
     REDIS_URL = "rediss://:${module.memorystore.auth_string}@${module.memorystore.host}:${module.memorystore.port}/0?ssl_cert_reqs=none"
-  }
+  }, lookup(each.value, "env", {}))
   labels = local.common_labels
 
   depends_on = [
