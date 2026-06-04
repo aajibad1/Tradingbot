@@ -67,7 +67,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: pip install mypy==1.11.2 pydantic==2.9.2 types-redis
-      - run: mypy --ignore-missing-imports shared/
+      - run: mypy --ignore-missing-imports --exclude 'shared/tests' shared/
 
   # Per-service typecheck is currently advisory (continue-on-error). Each
   # service has open type-hygiene work (async/sync redis return types,

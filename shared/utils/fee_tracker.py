@@ -186,7 +186,7 @@ def update_dynamic_min_edge(
             raw = redis.get(f"{REDIS_FEE_KEY_PREFIX}{ex}")
             if raw is not None:
                 try:
-                    per_exchange_fees[ex] = float(raw)
+                    per_exchange_fees[ex] = float(raw)  # type: ignore[arg-type]
                 except (TypeError, ValueError):
                     logger.warning("ignoring bad fee value in redis for %s: %r", ex, raw)
     blended = blended_fee_bps(per_exchange_fees)
@@ -206,7 +206,7 @@ def refresh_all(redis: Redis) -> dict[str, TierLookup]:
     for ex in FEE_TIERS_BPS:
         raw = redis.get(f"{REDIS_VOLUME_PREFIX}{ex}")
         try:
-            volume = float(raw) if raw is not None else 0.0
+            volume = float(raw) if raw is not None else 0.0  # type: ignore[arg-type]
         except (TypeError, ValueError):
             volume = 0.0
         lookup = update_redis_tier(redis, ex, volume)

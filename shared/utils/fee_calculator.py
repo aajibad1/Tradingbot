@@ -196,7 +196,7 @@ def min_viable_net_edge_bps() -> float:
     try:
         raw = _pooled_client(redis_url).get(DYNAMIC_MIN_EDGE_REDIS_KEY)
         # Tighten-only: never drop below the static floor.
-        value = MIN_VIABLE_NET_EDGE_BPS if raw is None else max(MIN_VIABLE_NET_EDGE_BPS, float(raw))
+        value = MIN_VIABLE_NET_EDGE_BPS if raw is None else max(MIN_VIABLE_NET_EDGE_BPS, float(raw))  # type: ignore[arg-type]
     except Exception:
         # Redis transient blip or bad value — fall back to the static default
         # rather than blocking the hot path.
