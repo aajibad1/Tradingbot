@@ -101,3 +101,13 @@ variable "bigquery_reader" {
   type        = bool
   default     = false
 }
+
+variable "ingress" {
+  description = <<-EOD
+    Cloud Run ingress. Defaults to INTERNAL_ONLY so the service is not reachable
+    from the public internet — Cloud Scheduler, Pub/Sub, and VPC traffic still
+    reach it. Only the browser-facing dashboard-api sets INGRESS_TRAFFIC_ALL.
+  EOD
+  type        = string
+  default     = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+}

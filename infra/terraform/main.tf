@@ -332,6 +332,9 @@ module "cloud_run" {
   secrets             = each.value.secrets
   allow_public_invoke = lookup(each.value, "allow_public_invoke", false)
   bigquery_reader     = lookup(each.value, "bigquery_reader", false)
+  # Public services accept internet ingress; everything else is internal-only
+  # (Cloud Scheduler / Pub/Sub / VPC still reach it). Defence-in-depth beyond IAM.
+  ingress = lookup(each.value, "allow_public_invoke", false) ? "INGRESS_TRAFFIC_ALL" : "INGRESS_TRAFFIC_INTERNAL_ONLY"
   env_vars = merge({
     GCP_PROJECT_ID = var.project_id
     ENVIRONMENT    = var.environment
