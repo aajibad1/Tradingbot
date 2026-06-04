@@ -31,6 +31,12 @@ logger = logging.getLogger(__name__)
 _RECONNECT_INITIAL_S = 1.0
 _RECONNECT_MAX_S = 30.0
 _HEALTH_KEY_PREFIX = "health:latency:"
+# A single symbol may fail this many times (with backoff) before we give up on
+# it and keep watching the rest — one bad symbol must not take down the venue.
+_MAX_SYMBOL_FAILURES = 8
+# Refresh the health key on a timer (< its 30s TTL) so a low-tick-rate venue
+# isn't marked unhealthy just because no tick arrived recently.
+_HEALTH_HEARTBEAT_S = 15.0
 
 
 @dataclass
@@ -49,6 +55,7 @@ class BaseCollector:
         self.publisher = get_publisher()
         self._stopping = asyncio.Event()
         self._last_message_at: float = 0.0
+        self._last_latency_ms: int = 0
         self._client: Any | None = None
 
     def is_healthy(self) -> bool:
@@ -90,33 +97,71 @@ class BaseCollector:
                     self._client = None
 
     async def _watch_loop(self) -> None:
-        """CCXT Pro watchTicker per-symbol fan-out."""
+        """CCXT Pro watchTicker per-symbol fan-out.
+
+        Each symbol is watched independently and resilient to its own failures:
+        a bad/halted symbol retries with backoff and is eventually dropped
+        WITHOUT cancelling its siblings (``return_exceptions=True``) — one bad
+        symbol can't take the whole venue offline. The loop only returns (→ full
+        reconnect) once every symbol has given up, i.e. the connection is truly
+        dead. A heartbeat keeps the health key fresh while connected.
+        """
         if self._client is None:
             raise RuntimeError("client not built")
 
         async def _watch_one(symbol: str) -> None:
             assert self._client is not None
+            backoff = _RECONNECT_INITIAL_S
+            failures = 0
             while not self._stopping.is_set():
-                t0 = time.time()
-                ticker = await self._client.watch_ticker(symbol)
-                self._last_message_at = time.time()
-                self._record_latency(int((time.time() - t0) * 1000))
-                tick = self._to_exchange_tick(symbol, ticker)
-                if tick is not None:
-                    # Fire-and-forget: blocking on the publish future here would
-                    # stall this exchange's whole watch fan-out on every tick.
-                    self.publisher.publish_nowait(
-                        Topic.MARKET_DATA,
-                        tick,
-                        attributes={"exchange": tick.exchange, "symbol": tick.symbol},
+                try:
+                    t0 = time.time()
+                    ticker = await self._client.watch_ticker(symbol)
+                    self._last_message_at = time.time()
+                    self._last_latency_ms = int((time.time() - t0) * 1000)
+                    self._record_latency(self._last_latency_ms)
+                    tick = self._to_exchange_tick(symbol, ticker)
+                    if tick is not None:
+                        # Fire-and-forget: blocking on the publish future here
+                        # would stall this exchange's whole watch fan-out.
+                        self.publisher.publish_nowait(
+                            Topic.MARKET_DATA,
+                            tick,
+                            attributes={"exchange": tick.exchange, "symbol": tick.symbol},
+                        )
+                    backoff, failures = _RECONNECT_INITIAL_S, 0  # recovered
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    failures += 1
+                    logger.exception(
+                        "%s watch failed for %s (failure %d/%d)",
+                        self.config.exchange, symbol, failures, _MAX_SYMBOL_FAILURES,
                     )
+                    if failures >= _MAX_SYMBOL_FAILURES:
+                        logger.error(
+                            "%s giving up on symbol %s after %d failures (siblings continue)",
+                            self.config.exchange, symbol, failures,
+                        )
+                        return
+                    await asyncio.sleep(backoff)
+                    backoff = min(_RECONNECT_MAX_S, backoff * 2)
 
-        tasks = [asyncio.create_task(_watch_one(s)) for s in self.config.symbols]
+        async def _heartbeat() -> None:
+            # Keep the health key alive while connected, even if symbols are quiet.
+            while not self._stopping.is_set():
+                await asyncio.sleep(_HEALTH_HEARTBEAT_S)
+                self._record_latency(self._last_latency_ms)
+
+        watchers = [asyncio.create_task(_watch_one(s)) for s in self.config.symbols]
+        heartbeat = asyncio.create_task(_heartbeat())
         try:
-            await asyncio.gather(*tasks)
+            await asyncio.gather(*watchers, return_exceptions=True)
         finally:
-            for t in tasks:
+            heartbeat.cancel()
+            for t in watchers:
                 t.cancel()
+            await asyncio.gather(heartbeat, *watchers, return_exceptions=True)
 
     def _record_latency(self, latency_ms: int) -> None:
         if self.redis is None:
@@ -135,7 +180,14 @@ class BaseCollector:
         ask = ticker.get("ask")
         if bid is None or ask is None or bid <= 0 or ask <= 0:
             return None
-        canonical = normalize_symbol(self.config.exchange, symbol, self.config.instrument_type)
+        try:
+            canonical = normalize_symbol(self.config.exchange, symbol, self.config.instrument_type)
+        except ValueError:
+            # An unparseable/misconfigured symbol must not crash the watcher —
+            # skip it (the per-symbol loop will count failures and drop it).
+            logger.warning("cannot normalize symbol %r on %s — skipping",
+                           symbol, self.config.exchange)
+            return None
         base = canonical.split("/", 1)[0]
         ts_ms = ticker.get("timestamp") or int(time.time() * 1000)
         return ExchangeTick(
