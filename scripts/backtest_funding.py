@@ -24,7 +24,7 @@ import ccxt
 from shared.utils.fee_calculator import calculate_net_edge, taker_fee_bps
 from shared.utils.slippage_model import estimate_size_tier_bps
 
-ASSETS = ["BTC", "ETH", "SOL"]
+DEFAULT_ASSETS = ["BTC", "ETH", "SOL"]
 HOLD_HOURS = 72
 PERIOD_HOURS = 1                  # hyperliquid funds hourly
 PERSISTENCE = 0.6                 # the synthetic haircut we want to validate
@@ -75,33 +75,40 @@ def gate_viable(entry_rate: float) -> tuple[float, bool]:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=45)
+    ap.add_argument("--assets", type=str, default=",".join(DEFAULT_ASSETS),
+                    help="comma-separated HL perp bases, e.g. ZRO,HYPE,DYDX")
     args = ap.parse_args()
+    assets = [a.strip().upper() for a in args.assets.split(",") if a.strip()]
 
     print(f"Round-trip cost assumed: {ROUND_TRIP_BPS:.1f} bps "
           f"(long {LONG_SPOT_VENUE} {LONG_FEE:.0f} + short HL {SHORT_FEE:.0f} + slip {2*SLIP:.0f} + buffer 3)\n")
 
     all_pnl, all_persist, total_windows, total_viable, pos_windows = [], [], 0, 0, 0
-    for asset in ASSETS:
+    for asset in assets:
         rates = fetch_funding_series(asset, args.days)
         if len(rates) < HOLD_HOURS + 1:
             print(f"{asset:4} insufficient history ({len(rates)} hrs)")
             continue
         # annualized APR series for context
         aprs = [r * 8760 * 100 for r in rates]
-        windows = range(0, len(rates) - HOLD_HOURS, HOLD_HOURS)
-        a_pnl, a_viable, a_pos = [], 0, 0
-        for i in windows:
+        # Continuous hourly entry, one position at a time: when flat, enter the
+        # moment funding clears the bar, hold HOLD_HOURS, then go flat. This is
+        # how the live strategy behaves and is the only way to catch transient
+        # funding spikes (a 72h grid misses spikes that don't land on a boundary).
+        a_pnl = []
+        i, n = 0, len(rates) - HOLD_HOURS
+        while i < n:
             total_windows += 1
             entry_rate = rates[i]
             if entry_rate <= 0:           # positive-funding carry only (short perp collects)
+                i += 1
                 continue
             pos_windows += 1
-            a_pos += 1
             _, viable = gate_viable(entry_rate)
             if not viable:
+                i += 1
                 continue
             total_viable += 1
-            a_viable += 1
             realized_funding_bps = sum(rates[i:i + HOLD_HOURS]) * 10_000.0   # signed actual
             pnl = realized_funding_bps - ROUND_TRIP_BPS
             credited = entry_rate * 10_000.0 * HOLD_HOURS                    # un-haircut entry credit
@@ -109,18 +116,18 @@ def main() -> None:
             all_pnl.append(pnl)
             if credited > 0:
                 all_persist.append(realized_funding_bps / credited)
+            i += HOLD_HOURS               # locked in the position for the hold
         hrs = len(rates)
         print(f"{asset:4} {hrs:>5} hrs  APR range [{min(aprs):+.0f}%, {max(aprs):+.0f}%]  "
-              f"median {statistics.median(aprs):+.1f}%  | {len(list(windows))} windows, "
-              f"{a_pos} positive, {a_viable} viable" +
-              (f", realized mean {statistics.mean(a_pnl):+.1f} bps" if a_pnl else ""))
+              f"median {statistics.median(aprs):+.1f}%  | entered {len(a_pnl)}"
+              + (f", realized mean {statistics.mean(a_pnl):+.1f} bps" if a_pnl else ""))
 
     print("\n" + "=" * 64)
     print(f"Backtest window: ~{args.days} days, {HOLD_HOURS}h non-overlapping carry windows")
-    print(f"  total windows evaluated : {total_windows}")
-    print(f"  positive-funding windows: {pos_windows}")
-    print(f"  cleared the bar (viable): {total_viable}"
-          + (f"  ({total_viable/pos_windows:.1%} of positive)" if pos_windows else ""))
+    print(f"  hourly entry checks (while flat): {total_windows}")
+    print(f"  positive-funding checks         : {pos_windows}")
+    print(f"  entries (cleared the bar)       : {total_viable}"
+          + (f"  ({total_viable/pos_windows:.2%} of positive)" if pos_windows else ""))
     if all_pnl:
         wins = sum(1 for p in all_pnl if p > 0)
         print(f"\n  TRADED carry windows ({len(all_pnl)}):")
