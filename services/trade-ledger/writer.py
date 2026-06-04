@@ -16,6 +16,7 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
+from shared.models.exchange_tick import ExchangeTick
 from shared.models.funding_rate import FundingRate
 from shared.models.opportunity import Opportunity
 from shared.models.trade import Trade
@@ -41,11 +42,31 @@ def _table(dataset: str, table: str) -> str:
     return f"{_PROJECT}.{dataset}.{table}"
 
 
-def _stream(table_id: str, row: dict) -> None:
+def _stream(table_id: str, row: dict, row_id: str | None = None) -> None:
+    """Audit-critical single-row insert.
+
+    Passes ``row_id`` as the BigQuery dedup key (best-effort de-duplication
+    within the streaming window) so at-least-once Pub/Sub redelivery doesn't
+    create duplicate rows. RAISES on insert errors so the Pub/Sub callback
+    nacks and the message is redelivered — never silently drop an audit row.
+    """
     client = _client()
-    errors = client.insert_rows_json(table_id, [row])
+    row_ids = [row_id] if row_id is not None else None
+    errors = client.insert_rows_json(table_id, [row], row_ids=row_ids)
     if errors:
-        logger.error("bigquery insert errors %s: %s", table_id, errors)
+        raise RuntimeError(f"bigquery insert failed {table_id}: {errors}")
+
+
+def _stream_many(table_id: str, rows: list[dict]) -> None:
+    """Batch streaming insert. Best-effort (logs, never raises) — used for the
+    high-volume, lossy-tolerant tick stream, NOT the audit-critical tables."""
+    if not rows:
+        return
+    client = _client()
+    errors = client.insert_rows_json(table_id, rows)
+    if errors:
+        logger.error("bigquery tick insert errors %s: %d rows, first=%s",
+                     table_id, len(rows), errors[:1])
 
 
 def trade_to_row(trade: Trade) -> dict:
@@ -150,21 +171,45 @@ def audit_log_to_row(payload: dict) -> dict:
     }
 
 
+def tick_to_row(tick: ExchangeTick) -> dict:
+    return {
+        "exchange": tick.exchange,
+        "symbol": tick.symbol,
+        "asset": tick.asset,
+        "bid": tick.bid,
+        "ask": tick.ask,
+        "bid_size": tick.bid_size,
+        "ask_size": tick.ask_size,
+        "last": tick.last,
+        "instrument_type": tick.instrument_type,
+        "observed_at": tick.timestamp.isoformat(),
+    }
+
+
+def write_ticks(rows: list[dict]) -> None:
+    """Batch-write downsampled ticks to arb_market_data.ticks (best-effort)."""
+    _stream_many(_table("arb_market_data", "ticks"), rows)
+
+
 def write_trade(trade: Trade) -> None:
-    _stream(_table("arb_trading", "trades"), trade_to_row(trade))
+    _stream(_table("arb_trading", "trades"), trade_to_row(trade), row_id=trade.id)
 
 
 def write_opportunity(opp: Opportunity) -> None:
-    _stream(_table("arb_trading", "opportunities"), opportunity_to_row(opp))
+    _stream(_table("arb_trading", "opportunities"), opportunity_to_row(opp), row_id=opp.id)
 
 
 def write_funding(rate: FundingRate) -> None:
-    _stream(_table("arb_trading", "funding_events"), funding_to_row(rate))
+    # No natural id — a venue/asset/timestamp tuple uniquely identifies a reading.
+    row_id = f"{rate.exchange}:{rate.asset}:{rate.observed_at.isoformat()}"
+    _stream(_table("arb_trading", "funding_events"), funding_to_row(rate), row_id=row_id)
 
 
 def write_risk_alert(payload: dict) -> None:
-    _stream(_table("arb_risk", "risk_events"), risk_alert_to_row(payload))
+    row_id = payload.get("event_id") or f"{payload.get('alert_type')}:{payload['emitted_at']}"
+    _stream(_table("arb_risk", "risk_events"), risk_alert_to_row(payload), row_id=row_id)
 
 
 def write_audit_log(payload: dict) -> None:
-    _stream(_table("arb_audit", "audit_log"), audit_log_to_row(payload))
+    row_id = payload.get("event_id") or f"{payload['source']}:{payload['event_type']}:{payload['emitted_at']}"
+    _stream(_table("arb_audit", "audit_log"), audit_log_to_row(payload), row_id=row_id)

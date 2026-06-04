@@ -74,12 +74,30 @@ def calculate_net_edge(
     slippage_long_bps: float,
     slippage_short_bps: float,
     funding_rate_bps_per_period: float = 0.0,
+    funding_periods: int = 1,
+    funding_persistence: float = 1.0,
     transfer_cost_bps: float = 0.0,
     borrow_cost_bps: float = 0.0,
     safety_buffer_bps: float = DEFAULT_SAFETY_BUFFER_BPS,
     min_viable_net_edge_bps: float | None = None,
 ) -> NetEdgeResult:
     """Compute net edge and full cost breakdown.
+
+    Carry is a MULTI-PERIOD edge: a delta-neutral funding trade collects
+    ``funding_rate_bps_per_period`` every period over its planned hold, while
+    the round-trip fees/slippage are paid ONCE. ``funding_periods`` is the
+    number of funding periods expected over the hold, so the funding term
+    credited is ``funding_rate_bps_per_period * funding_periods``. The default
+    of 1 makes a single-period (or non-funding) call behave exactly as before —
+    spread strategies pass funding 0 and are unaffected.
+
+    ``funding_persistence`` (0..1) haircuts the credited funding to account for
+    early exit (the position closes before the full hold) and funding
+    mean-reversion (later periods earn less than the entry rate). Crediting the
+    full entry-rate over the full hold systematically OVERSTATES carry edge —
+    the stress test showed the modeled edge running 1.5–10x the realized PnL as
+    the assumed hold grew. The default 1.0 preserves legacy behaviour; the
+    funding strategy passes a calibrated discount.
 
     ``is_viable`` is True when ``net_edge_bps > threshold``, where the
     threshold defaults to the module-level ``MIN_VIABLE_NET_EDGE_BPS`` but
@@ -97,7 +115,8 @@ def calculate_net_edge(
         + borrow_cost_bps
         + safety_buffer_bps
     )
-    net_edge_bps = gross_spread_bps + funding_rate_bps_per_period - total_cost_bps
+    funding_total_bps = funding_rate_bps_per_period * funding_periods * funding_persistence
+    net_edge_bps = gross_spread_bps + funding_total_bps - total_cost_bps
     threshold = (
         min_viable_net_edge_bps
         if min_viable_net_edge_bps is not None
@@ -177,7 +196,7 @@ def min_viable_net_edge_bps() -> float:
     try:
         raw = _pooled_client(redis_url).get(DYNAMIC_MIN_EDGE_REDIS_KEY)
         # Tighten-only: never drop below the static floor.
-        value = MIN_VIABLE_NET_EDGE_BPS if raw is None else max(MIN_VIABLE_NET_EDGE_BPS, float(raw))
+        value = MIN_VIABLE_NET_EDGE_BPS if raw is None else max(MIN_VIABLE_NET_EDGE_BPS, float(raw))  # type: ignore[arg-type]
     except Exception:
         # Redis transient blip or bad value — fall back to the static default
         # rather than blocking the hot path.

@@ -29,9 +29,22 @@ import csv
 import logging
 import os
 from datetime import date
+from decimal import Decimal, ROUND_HALF_UP
 from io import StringIO
 
 logger = logging.getLogger(__name__)
+
+_CENTS = Decimal("0.01")
+
+
+def _money(value) -> Decimal:
+    """Coerce a BigQuery NUMERIC (Decimal) or any number to Decimal safely."""
+    return value if isinstance(value, Decimal) else Decimal(str(value))
+
+
+def _cents(value: Decimal) -> str:
+    """Round to cents (half-up, as the IRS expects) and render as a string."""
+    return str(value.quantize(_CENTS, rounding=ROUND_HALF_UP))
 
 
 _PROJECT = os.environ.get("GCP_PROJECT_ID")
@@ -97,16 +110,20 @@ def export_year(tax_year: int) -> str:
 
     for row in job.result():
         description, proceeds, cost_basis = _form_8949_fields(row)
+        # Round each reported column to cents so the form foots exactly:
+        # col (h) gain = (d) proceeds - (e) cost basis, both already rounded.
+        proceeds_c = proceeds.quantize(_CENTS, rounding=ROUND_HALF_UP)
+        cost_c = cost_basis.quantize(_CENTS, rounding=ROUND_HALF_UP)
         writer.writerow(
             [
                 description,
                 _fmt_date(row["opened_at"]),
                 _fmt_date(row["closed_at"]),
-                f"{proceeds:.2f}",
-                f"{cost_basis:.2f}",
+                str(proceeds_c),
+                str(cost_c),
                 "",
                 "",
-                f"{(proceeds - cost_basis):.2f}",
+                str(proceeds_c - cost_c),
                 row["trade_id"],
             ]
         )
@@ -176,7 +193,7 @@ def export_funding_income_year(tax_year: int) -> str:
                 row["short_exchange"],
                 _fmt_date(row["opened_at"]),
                 _fmt_date(row["closed_at"]),
-                f"{float(row['funding_collected_usd']):.2f}",
+                _cents(_money(row["funding_collected_usd"])),
                 "funding_payment_ordinary_income",
             ]
         )
@@ -184,25 +201,32 @@ def export_funding_income_year(tax_year: int) -> str:
     return buf.getvalue()
 
 
-def _form_8949_fields(row) -> tuple[str, float, float]:
+def _form_8949_fields(row) -> tuple[str, Decimal, Decimal]:
     """Compute Form 8949 description + proceeds + cost basis from a trade row.
 
     Multi-leg arb trades net the legs by side. The 'description' picks the
     largest filled quantity from the buy side (the position we 'acquired').
+    All money is Decimal (BigQuery NUMERIC) — no float accumulation.
     """
     legs = row["legs"] or []
     buy_legs = [leg for leg in legs if leg["side"] == "buy"]
     sell_legs = [leg for leg in legs if leg["side"] == "sell"]
 
-    cost_basis = sum(leg["size"] * leg["fill_price"] + leg["fee_usd"] for leg in buy_legs)
-    proceeds = sum(leg["size"] * leg["fill_price"] - leg["fee_usd"] for leg in sell_legs)
+    cost_basis = sum(
+        (_money(leg["size"]) * _money(leg["fill_price"]) + _money(leg["fee_usd"]) for leg in buy_legs),
+        Decimal("0"),
+    )
+    proceeds = sum(
+        (_money(leg["size"]) * _money(leg["fill_price"]) - _money(leg["fee_usd"]) for leg in sell_legs),
+        Decimal("0"),
+    )
 
     if buy_legs:
         biggest = max(buy_legs, key=lambda leg: leg["size"])
-        description = f"{biggest['size']:.8f} {biggest['asset']}"
+        description = f"{float(biggest['size']):.8f} {biggest['asset']}"
     else:
         description = f"{row['asset']} arb trade"
-    return description, float(proceeds), float(cost_basis)
+    return description, proceeds, cost_basis
 
 
 def _fmt_date(value) -> str:

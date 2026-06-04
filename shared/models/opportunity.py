@@ -33,3 +33,9 @@ class Opportunity(BaseModel):
     detected_at: datetime
     execute: bool = Field(default=False, description="Only True after risk-engine approval")
     rejection_reason: str | None = None
+
+    # Reference prices at detection, carried so the execution simulator prices
+    # fills off the REAL market instead of a hardcoded placeholder. Optional for
+    # backward compatibility; consumers fall back when absent.
+    long_reference_price: float | None = Field(default=None, gt=0.0)
+    short_reference_price: float | None = Field(default=None, gt=0.0)

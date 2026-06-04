@@ -22,7 +22,7 @@ import hmac
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import TYPE_CHECKING
 
@@ -84,6 +84,61 @@ def _redis() -> Redis:
     from redis import Redis
 
     return Redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0"), decode_responses=True)
+
+
+DEFAULT_SUPERVISED_DAYS = 14
+
+
+def approval_required(now: datetime | None = None) -> bool:
+    """Whether a trade needs human Slack approval before it can execute.
+
+    Implements the spec's "human confirmation for the first N days of live
+    trading" — but FAILS SAFE: approval is ALWAYS required unless an operator
+    has *explicitly* opted into autonomous execution AND the supervised window
+    has elapsed. Autonomous live trading is never a silent default.
+
+    Config:
+      ENABLE_AUTONOMOUS_EXECUTION = "true" to ever allow auto-execution.
+      LIVE_SINCE                  = ISO date/datetime when live trading began.
+      APPROVAL_REQUIRED_DAYS      = supervised-window length (default 14).
+    """
+    if os.environ.get("ENABLE_AUTONOMOUS_EXECUTION", "false").lower() != "true":
+        return True  # default posture: every trade is human-approved
+    live_since = os.environ.get("LIVE_SINCE")
+    if not live_since:
+        return True  # autonomous requested but no go-live date recorded → stay safe
+    try:
+        started = datetime.fromisoformat(live_since)
+    except ValueError:
+        logger.error("LIVE_SINCE=%r is not ISO format — requiring approval", live_since)
+        return True
+    try:
+        days = int(os.environ.get("APPROVAL_REQUIRED_DAYS", str(DEFAULT_SUPERVISED_DAYS)))
+    except ValueError:
+        days = DEFAULT_SUPERVISED_DAYS
+    now = now or datetime.utcnow()
+    return (now - started) < timedelta(days=days)  # True while still in the supervised window
+
+
+def auto_approve(opp: Opportunity) -> PendingApproval:
+    """Persist an opportunity directly as APPROVED, bypassing the Slack gate.
+
+    Used ONLY in autonomous mode (after the supervised window). The orchestrator
+    tick loop drains the approved set exactly as it would for a human approval.
+    """
+    now = datetime.utcnow()
+    pending = PendingApproval(
+        opportunity_id=opp.id,
+        opportunity=opp,
+        posted_at=now,
+        expires_at=now + timedelta(hours=1),
+        status=ApprovalStatus.APPROVED,
+        decided_by="auto-execution",
+        decided_at=now,
+    )
+    _redis().setex(f"{KEY_PREFIX_APPROVED}{opp.id}", 3600, pending.model_dump_json())
+    logger.warning("AUTONOMOUS execution: opp=%s auto-approved (past supervised window)", opp.id)
+    return pending
 
 
 def submit_for_approval(opp: Opportunity) -> PendingApproval:

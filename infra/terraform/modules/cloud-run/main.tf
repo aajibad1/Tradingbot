@@ -53,7 +53,7 @@ resource "google_cloud_run_v2_service" "svc" {
   project  = var.project_id
   location = var.region
   name     = var.service_name
-  ingress  = "INGRESS_TRAFFIC_ALL"
+  ingress  = var.ingress
   labels   = var.labels
 
   # Cloud Run v2 defaults this to true. Our services hold no state (Redis +

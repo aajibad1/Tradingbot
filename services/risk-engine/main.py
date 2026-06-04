@@ -30,7 +30,6 @@ Evaluation order (canonical — see CLAUDE.md "risk-engine is the choke point"):
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from contextlib import asynccontextmanager

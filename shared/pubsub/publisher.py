@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
-    from google.cloud import pubsub_v1
+    from google.cloud import pubsub_v1  # type: ignore[attr-defined]
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ class Topic(str, Enum):
 
 class EventPublisher:
     def __init__(self, project_id: str | None = None) -> None:
-        from google.cloud import pubsub_v1  # local import — only needed in prod
+        from google.cloud import pubsub_v1  # type: ignore[attr-defined]  # local import — only needed in prod
 
         self.project_id = project_id or os.environ["GCP_PROJECT_ID"]
         self.client: pubsub_v1.PublisherClient = pubsub_v1.PublisherClient()

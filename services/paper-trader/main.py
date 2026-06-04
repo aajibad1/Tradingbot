@@ -32,6 +32,7 @@ from simulator.execution_model import new_trade_id, simulate_execution
 from simulator.funding_simulator import funding_period_hours, simulate_funding_payment
 from simulator.spread_collapse import sample_early_exit
 from shared.models.trade import Trade, TradeStatus, TradeType
+from shared.utils.slippage_model import estimate_size_tier_bps
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("paper-trader")
@@ -63,11 +64,24 @@ def _on_opportunity(message) -> None:
 
     logger.info("simulating opportunity id=%s strategy=%s net_edge=%.1f bps", opp.id, opp.strategy, opp.net_edge_bps)
 
-    # Simulate with default book depths (can be overridden via POST /simulate for testing)
+    # Use the REAL reference prices carried on the opportunity (set by the
+    # detecting strategy). Fall back only if a producer didn't populate them —
+    # that should not happen post-fix, so warn loudly rather than silently
+    # simulating every asset at a placeholder price.
+    long_price = opp.long_reference_price
+    short_price = opp.short_reference_price
+    if long_price is None or short_price is None:
+        logger.warning(
+            "opportunity id=%s missing reference price(s) — falling back to placeholder; "
+            "PnL for this trade is unreliable", opp.id,
+        )
+        long_price = long_price or 50_000.0
+        short_price = short_price or 50_000.0
+
     req = SimulateRequest(
         opportunity=opp,
-        long_reference_price=50_000.0,  # Placeholder — real price N/A in Pub/Sub flow
-        short_reference_price=50_050.0,
+        long_reference_price=long_price,
+        short_reference_price=short_price,
         long_book_depth_usd=250_000.0,
         short_book_depth_usd=250_000.0,
     )
@@ -119,9 +133,18 @@ def _simulate_internal(req: SimulateRequest) -> Trade | None:
         req.opportunity.funding_rate_annualized_pct
         * (short_period_hours / (365 * 24))
     )
-    notional = req.opportunity.recommended_size_usd
+    # Partial fills: spread capture and funding accrue only on the HEDGED
+    # (delta-neutral) notional = the smaller of the two filled legs. Any
+    # imbalance is unhedged directional exposure that must be flattened at a
+    # cost — so partial fills correctly reduce PnL instead of being booked at
+    # the full requested size.
+    long_filled = long_leg.leg.size * long_leg.leg.fill_price
+    short_filled = short_leg.leg.size * short_leg.leg.fill_price
+    hedged_notional = min(long_filled, short_filled)
+    residual_notional = abs(long_filled - short_filled)
+
     funding_usd = simulate_funding_payment(
-        notional_usd=notional,
+        notional_usd=hedged_notional,
         funding_rate_pct_per_period=funding_pct_per_period,
         is_short_perp=True,
         periods=periods_elapsed,
@@ -130,11 +153,13 @@ def _simulate_internal(req: SimulateRequest) -> Trade | None:
     # Gross PnL = price convergence — assume the spread fully closes at exit
     # when no early exit; otherwise the spread has only half-closed.
     spread_capture_ratio = 0.5 if early_exit is not None else 1.0
-    gross_pnl = notional * (req.opportunity.gross_spread_bps / 10_000.0) * spread_capture_ratio
+    gross_pnl = hedged_notional * (req.opportunity.gross_spread_bps / 10_000.0) * spread_capture_ratio
 
     fees_usd = long_leg.leg.fee_usd + short_leg.leg.fee_usd
     slippage_usd = long_leg.leg.slippage_usd + short_leg.leg.slippage_usd
-    net_pnl = gross_pnl + funding_usd - fees_usd - slippage_usd
+    # Cost to flatten the unhedged residual leg (slippage on the stray exposure).
+    residual_cost_usd = residual_notional * estimate_size_tier_bps(residual_notional) / 10_000.0
+    net_pnl = gross_pnl + funding_usd - fees_usd - slippage_usd - residual_cost_usd
 
     trade = Trade(
         id=new_trade_id(),
