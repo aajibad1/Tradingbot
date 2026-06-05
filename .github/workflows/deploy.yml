@@ -1,5 +1,9 @@
 name: Deploy
 
+# Deploys are run from the CLI, NOT from GitHub Actions. On push this workflow
+# only builds + pushes images (so Artifact Registry always has a fresh image to
+# `terraform apply` against locally). The terraform-apply-prod job is gated to
+# manual `workflow_dispatch` only — no push ever auto-applies to prod.
 on:
   push:
     branches: [main]
@@ -72,6 +76,10 @@ jobs:
   # ---------------------------------------------------------------------------
   terraform-apply-prod:
     needs: build-and-push
+    # Manual-only: prod is deployed from the CLI (`terraform apply` in
+    # infra/terraform/environments/prod). This job runs solely on an explicit
+    # workflow_dispatch, never on push.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -100,7 +108,9 @@ jobs:
   notify:
     needs: [build-and-push, terraform-apply-prod]
     runs-on: ubuntu-latest
-    if: always()
+    # Only relevant for an actual deploy (manual dispatch); skip on plain pushes
+    # where no terraform-apply runs.
+    if: ${{ always() && github.event_name == 'workflow_dispatch' }}
     steps:
       - name: Post deploy status to Slack
         env:
