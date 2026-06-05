@@ -80,7 +80,9 @@ class SubscriptionStatus(str, Enum):
 class Role(str, Enum):
     OWNER = "owner"
     ADMIN = "admin"
-    VIEWER = "viewer"
+    OPERATOR = "operator"
+    ANALYST = "analyst"
+    SUPPORT = "support"
 
 
 class Base(DeclarativeBase):

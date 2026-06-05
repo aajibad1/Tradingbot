@@ -212,6 +212,63 @@ def test_webhook_503_when_unconfigured(client, monkeypatch):
     assert r.status_code == 503
 
 
+# --- RBAC + live-trading gate -------------------------------------------------
+
+def test_rbac_role_permission_mapping():
+    from db import Role
+    from rbac import Permission, effective_permissions
+    assert Permission.ENABLE_LIVE_TRADING in effective_permissions([Role.OWNER])
+    assert Permission.ENABLE_LIVE_TRADING not in effective_permissions([Role.ANALYST])
+    # withdrawal is owner-only, even for admin
+    assert Permission.REQUEST_WITHDRAWAL in effective_permissions([Role.OWNER])
+    assert Permission.REQUEST_WITHDRAWAL not in effective_permissions([Role.ADMIN])
+
+
+def test_owner_has_all_permissions(client):
+    h = _auth("rb-1", "h@x.com")
+    client.post("/v1/sessions", headers=h)
+    body = client.get("/v1/permissions", headers=h).json()
+    assert body["roles"] == ["owner"]
+    assert "enable_live_trading" in body["permissions"]
+    assert "request_withdrawal" in body["permissions"]
+
+
+def _ready_pro(client, uid, market="global", country="US"):
+    h = _auth(uid, f"{uid}@x.com")
+    tid = client.post("/v1/sessions", headers=h).json()["tenant_id"]
+    client.post("/v1/onboarding/region", headers=h, json={"market": market, "country": country})
+    client.post("/v1/onboarding/kyc", headers=h, json={"full_name": "T"})
+    client.post("/v1/onboarding/submit", headers=h)
+    _post_event(client, _event("checkout.session.completed", tid, plan="pro", event_id=f"evt-{uid}"))
+    return h
+
+
+def test_live_enable_blocked_without_pro_plan(client):
+    # onboarded to trading_ready but still on the free plan
+    h = _auth("le-1", "i@x.com")
+    client.post("/v1/sessions", headers=h)
+    client.post("/v1/onboarding/region", headers=h, json={"market": "global", "country": "US"})
+    client.post("/v1/onboarding/kyc", headers=h, json={"full_name": "T"})
+    client.post("/v1/onboarding/submit", headers=h)
+    r = client.post("/v1/trading/live-enable", headers=h)
+    assert r.status_code == 403  # plan gate
+
+
+def test_live_enable_blocked_until_trading_ready(client):
+    # pro plan but onboarding not completed
+    tid = _mint(client, "le-2")
+    _post_event(client, _event("checkout.session.completed", tid, plan="pro", event_id="evt-le2"))
+    r = client.post("/v1/trading/live-enable", headers=_auth("le-2"))
+    assert r.status_code == 409  # onboarding gate
+
+
+def test_live_enable_succeeds_when_all_gates_pass(client):
+    h = _ready_pro(client, "le-3")
+    r = client.post("/v1/trading/live-enable", headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["live_enabled"] is True
+
+
 def test_local_mode_rejects_non_local_bearer(client):
     # a raw token (not 'local:...') is refused when no Firebase is configured
     r = client.get("/v1/me", headers={"Authorization": "Bearer some-random-jwt"})

@@ -48,6 +48,11 @@ class KycSubmitRequest(BaseModel):
     document_type: str | None = None  # placeholder until a real KYC provider is wired
 
 
+class PermissionsView(BaseModel):
+    roles: list[Role]
+    permissions: list[str]
+
+
 class OnboardingView(BaseModel):
     """Current onboarding position + what the user should do next."""
 

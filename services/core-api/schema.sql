@@ -45,6 +45,6 @@ CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id);
 
 CREATE TABLE IF NOT EXISTS user_roles (
     user_id  VARCHAR(128) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role     VARCHAR(16)  NOT NULL,                       -- owner|admin|viewer
+    role     VARCHAR(16)  NOT NULL,                       -- owner|admin|operator|analyst|support
     PRIMARY KEY (user_id, role)
 );

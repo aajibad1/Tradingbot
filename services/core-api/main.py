@@ -45,9 +45,11 @@ from models import (
     EntitlementsView,
     KycSubmitRequest,
     OnboardingView,
+    PermissionsView,
     Profile,
     RegionSelectRequest,
 )
+from rbac import Permission, effective_permissions
 from shared.tenant import validate_tenant
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -280,3 +282,61 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_session)) -
     db.commit()
     logger.info("stripe webhook %s", summary)
     return {"status": "ok", "summary": summary}
+
+
+# --- RBAC + live-trading gate -------------------------------------------------
+
+def require_permission(perm: Permission):
+    """Dependency factory — 403 unless the caller's roles grant ``perm``."""
+    def _dep(identity: Identity = Depends(current_identity),
+             db: Session = Depends(get_session)) -> User:
+        user = _load_user(db, identity.uid)
+        if user is None:
+            raise HTTPException(status_code=404, detail="no session — POST /v1/sessions first")
+        if perm not in effective_permissions([r.role for r in user.roles]):
+            raise HTTPException(status_code=403, detail=f"missing permission {perm.value}")
+        return user
+    return _dep
+
+
+@app.get("/v1/permissions", response_model=PermissionsView)
+def permissions(
+    identity: Identity = Depends(current_identity),
+    db: Session = Depends(get_session),
+) -> PermissionsView:
+    user = _load_user(db, identity.uid)
+    if user is None:
+        raise HTTPException(status_code=404, detail="no session — POST /v1/sessions first")
+    roles = sorted((r.role for r in user.roles), key=lambda r: r.value)
+    perms = sorted(p.value for p in effective_permissions(roles))
+    return PermissionsView(roles=roles, permissions=perms)
+
+
+@app.post("/v1/trading/live-enable", response_model=Profile)
+def live_enable(
+    user: User = Depends(require_permission(Permission.ENABLE_LIVE_TRADING)),
+    db: Session = Depends(get_session),
+) -> Profile:
+    """Flip a tenant from paper to live-eligible — only when ALL gates pass:
+      1. caller has the ENABLE_LIVE_TRADING permission (dependency above),
+      2. the tenant's PLAN entitles live trading,
+      3. onboarding is TRADING_READY (KYC + regional policy cleared).
+    NOTE: live_enabled is the entitlement flag only; actual live execution still
+    requires the per-tenant validation gate (Sharpe + paper run) per
+    TRADING_ASSUMPTIONS.md. Billing/permission can't bypass that.
+    """
+    tenant = user.tenant
+    if not billing.entitlements_for(tenant.plan).live_trading:
+        raise HTTPException(status_code=403, detail=f"plan '{tenant.plan.value}' does not include live trading")
+    if tenant.onboarding_status is not OnboardingStatus.TRADING_READY:
+        raise HTTPException(
+            status_code=409,
+            detail=f"onboarding is '{tenant.onboarding_status.value}', not trading_ready",
+        )
+    tenant.live_enabled = True
+    db.add(OnboardingEvent(tenant_id=tenant.id, action="live.enabled",
+                           from_status=tenant.onboarding_status, to_status=tenant.onboarding_status,
+                           detail=f"plan={tenant.plan.value}"))
+    db.commit()
+    logger.info("tenant=%s live-enabled (plan=%s)", tenant.id, tenant.plan.value)
+    return _to_profile(user)
