@@ -1,6 +1,7 @@
 -- Every opportunity detected (executed or not). 7-year retention.
 CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.arb_trading.opportunities` (
   opportunity_id            STRING    NOT NULL,
+  user_id                   STRING    NOT NULL,  -- owning tenant/user
   strategy                  STRING    NOT NULL,
   asset                     STRING    NOT NULL,
   long_exchange             STRING    NOT NULL,
@@ -19,4 +20,4 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.arb_trading.opportunities` (
   ingested_at               TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP()
 )
 PARTITION BY DATE(detected_at)
-CLUSTER BY strategy, asset;
+CLUSTER BY user_id, strategy, asset;

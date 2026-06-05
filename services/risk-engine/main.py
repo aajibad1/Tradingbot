@@ -81,7 +81,8 @@ def _on_trade_fill(message) -> None:
     """Fold an inbound Trade fill into the Redis risk state."""
     try:
         trade = Trade.model_validate_json(message.data)
-        position_tracker.apply_trade(get_redis(), trade)
+        # Route the fill to its owning tenant's risk state.
+        position_tracker.apply_trade(get_redis(), trade, trade.user_id)
         message.ack()
     except Exception:
         logger.exception("failed to apply trade fill to risk state")

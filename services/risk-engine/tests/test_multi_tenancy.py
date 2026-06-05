@@ -13,9 +13,9 @@ from shared.models.trade import Trade, TradeStatus, TradeType
 from shared.tenant import risk_key
 
 
-def _closed_loss(opp_id: str, net: float) -> Trade:
+def _closed_loss(opp_id: str, net: float, user_id: str = "default") -> Trade:
     return Trade(
-        id=f"t-{opp_id}", opportunity_id=opp_id, type=TradeType.PAPER, legs=[],
+        id=f"t-{opp_id}", user_id=user_id, opportunity_id=opp_id, type=TradeType.PAPER, legs=[],
         gross_pnl_usd=net, net_pnl_usd=net, status=TradeStatus.CLOSED,
         opened_at=datetime(2026, 1, 1), closed_at=datetime(2026, 1, 1),
     )
@@ -31,6 +31,15 @@ def test_tenant_risk_state_is_isolated(fake_redis) -> None:
     assert load_state(fake_redis, "userA").daily_pnl_usd == -500.0
     assert load_state(fake_redis, "userB").daily_pnl_usd == 0.0
     assert fake_redis.get("risk:daily_pnl_usd") is None  # legacy default key never written
+
+
+def test_apply_trade_routes_by_trade_user_id(fake_redis) -> None:
+    # A fill carries its owner; the subscriber routes it to that tenant's state.
+    fake_redis.set(risk_key("capital_usd", "u7"), "100000")
+    trade = _closed_loss("o9", -250.0, user_id="u7")
+    position_tracker.apply_trade(fake_redis, trade, trade.user_id)
+    assert load_state(fake_redis, "u7").daily_pnl_usd == -250.0
+    assert fake_redis.get("risk:daily_pnl_usd") is None  # default untouched
 
 
 def test_per_tenant_kill_switch_does_not_leak(fake_redis) -> None:
