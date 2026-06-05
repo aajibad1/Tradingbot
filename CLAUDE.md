@@ -73,7 +73,7 @@ Subscriptions follow the convention `<topic-name>-<consumer-service>` (e.g. `arb
 
 ### Single source of truth for net-edge math
 
-`shared/utils/fee_calculator.py#calculate_net_edge` is the only place the spread/fee/slippage/buffer formula is allowed to live. The `opportunity-engine` scorer calls it; strategies must **not** reimplement it. `MIN_VIABLE_NET_EDGE_BPS = 8.0` and `DEFAULT_SAFETY_BUFFER_BPS = 3.0` are the canonical thresholds. Per-exchange taker fees live in `EXCHANGE_TAKER_FEE_BPS` in the same module — `taker_fee_bps()` raises `KeyError` on an unknown exchange (intentional: fail loud, never silently default).
+`shared/utils/fee_calculator.py#calculate_net_edge` is the only place the spread/fee/slippage/buffer formula is allowed to live. The `opportunity-engine` scorer calls it; strategies must **not** reimplement it. `MIN_VIABLE_NET_EDGE_BPS = 50.0` and `DEFAULT_SAFETY_BUFFER_BPS = 3.0` are the canonical thresholds (the 50 bps bar was raised from an earlier 8 bps after real-data backtests showed modeled edge running 1.5–10× realized — see the module docstring and `scripts/validate_strategy.py`). Per-exchange taker fees live in `EXCHANGE_TAKER_FEE_BPS` in the same module — `taker_fee_bps()` raises `KeyError` on an unknown exchange (intentional: fail loud, never silently default).
 
 ### risk-engine is the choke point
 
