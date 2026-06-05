@@ -89,14 +89,25 @@ def _on_opportunity(message) -> None:
     message.ack()
 
 
-def _simulate_internal(req: SimulateRequest) -> Trade | None:
-    """Core simulation logic — reused by both Pub/Sub callback and POST endpoint."""
+def simulate_trade(
+    req: SimulateRequest,
+    rng: random.Random | None = None,
+    now: datetime | None = None,
+) -> Trade | None:
+    """Pure simulation — produce a paper ``Trade`` from an approved opportunity.
+
+    No side effects: this does NOT publish to ``arb-trade-fills`` (that is
+    ``_simulate_internal``'s job). Injecting ``rng`` / ``now`` makes the
+    simulation fully deterministic, which the stage-2 paper-run gate
+    (``scripts/paper_run.py``) relies on for a reproducible PASS/FAIL and which
+    tests use to pin partial-fill / early-exit behaviour.
+    """
     if not req.opportunity.execute:
         logger.warning("opportunity id=%s not approved (execute=False)", req.opportunity.id)
         return None
 
-    rng = random.Random()
-    now = datetime.utcnow()
+    rng = rng or random.Random()
+    now = now or datetime.utcnow()
 
     # Simulate the two legs concurrently (logically simultaneous, latency-skewed).
     long_leg = simulate_execution(
@@ -178,8 +189,16 @@ def _simulate_internal(req: SimulateRequest) -> Trade | None:
             else f"held_full_horizon={planned_hours:.1f}h"
         ),
     )
-    append_paper_trade(trade)
     logger.info("trade id=%s net_pnl=%.2f closed_at=%s", trade.id, net_pnl, closed_at)
+    return trade
+
+
+def _simulate_internal(req: SimulateRequest) -> Trade | None:
+    """Simulate then publish to ``arb-trade-fills`` — the Pub/Sub callback and
+    POST ``/simulate`` path. Wraps the pure ``simulate_trade``."""
+    trade = simulate_trade(req)
+    if trade is not None:
+        append_paper_trade(trade)
     return trade
 
 

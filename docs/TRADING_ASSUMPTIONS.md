@@ -62,6 +62,39 @@ Once live/paper fills exist (trade-ledger BigQuery `arb_trading.trades`):
    the empirical funding/spread distributions from BigQuery. The goal is
    `modeled ≈ realized` (gap near zero) at the chosen settings.
 
+## Promotion ladder — no tenant goes live until the edge clears every gate
+
+These assumptions only earn the right to trade real money by surviving a fixed
+sequence of gates. The ladder is **non-negotiable**; each rung is necessary, not
+sufficient, for the next.
+
+1. **Stage 1 — does the edge exist?** `scripts/validate_strategy.py`. Runs the
+   real-data funding backtest (`scripts/backtest_funding.py`) and gates on
+   risk-adjusted metrics (Sharpe / drawdown / trade count / total return) using
+   an *analytic* round-trip cost. Assumes every position is held the full 72h.
+
+   ```bash
+   PYTHONPATH=. python3 scripts/validate_strategy.py --days 90 --assets BTC,ETH,SOL
+   ```
+
+2. **Stage 2 — does it survive execution?** `scripts/paper_run.py`. Replays the
+   SAME real-data entries through the actual paper-trader execution simulator —
+   real fees, slippage, partial fills, and **spread-collapse early exit** (which
+   makes positions collect fewer funding periods than the entry model credited)
+   — then re-gates on the realized paper PnL. A stage-1 PASS that fails here
+   means execution frictions eat the edge: do **not** promote.
+
+   ```bash
+   PYTHONPATH=.:services/paper-trader python3 scripts/paper_run.py --days 90 --assets BTC,ETH,SOL
+   ```
+
+3. **Stage 3 — live paper run on real fills.** A real paper deployment whose
+   fills land in trade-ledger BigQuery (`arb_trading.trades`); use them to
+   re-calibrate the assumptions below ("How to re-calibrate from REAL fills")
+   until `modeled ≈ realized`. This is the final confirmation before capital.
+
+Both stages 1 and 2 exit non-zero on FAIL, so either can gate CI / a release.
+
 ## Hard limits that are NOT tunable
 - `risk-engine` kill switch, drawdown / position / leverage limits (`DEFAULT_LIMITS`).
 - ai-ops `NEVER`-tier (withdrawals, leverage increases) and the PROPOSE allowlist.
