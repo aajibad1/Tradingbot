@@ -64,6 +64,19 @@ class KycStatus(str, Enum):
     REJECTED = "rejected"
 
 
+class PlanTier(str, Enum):
+    FREE = "free"
+    STARTER = "starter"
+    PRO = "pro"
+
+
+class SubscriptionStatus(str, Enum):
+    NONE = "none"
+    ACTIVE = "active"
+    PAST_DUE = "past_due"
+    CANCELED = "canceled"
+
+
 class Role(str, Enum):
     OWNER = "owner"
     ADMIN = "admin"
@@ -87,6 +100,11 @@ class Tenant(Base):
         _enum_col(OnboardingStatus), default=OnboardingStatus.ACCOUNT_CREATED
     )
     kyc_status: Mapped[KycStatus] = mapped_column(_enum_col(KycStatus), default=KycStatus.NONE)
+    plan: Mapped[PlanTier] = mapped_column(_enum_col(PlanTier), default=PlanTier.FREE)
+    subscription_status: Mapped[SubscriptionStatus] = mapped_column(
+        _enum_col(SubscriptionStatus), default=SubscriptionStatus.NONE
+    )
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     live_enabled: Mapped[bool] = mapped_column(default=False)  # paper until explicitly promoted
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
 
@@ -134,6 +152,18 @@ class OnboardingEvent(Base):
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
 
     tenant: Mapped[Tenant] = relationship(back_populates="events")
+
+
+class WebhookEvent(Base):
+    """Idempotency ledger for inbound webhooks (Stripe now, Clerk later). The
+    provider's event id is the PK, so a redelivered event is a no-op."""
+
+    __tablename__ = "webhook_events"
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)  # provider event id
+    source: Mapped[str] = mapped_column(String(32))                 # 'stripe' | 'clerk'
+    event_type: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
 
 
 _engine = None

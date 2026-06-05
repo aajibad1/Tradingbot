@@ -6,7 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from db import KycStatus, Market, OnboardingStatus, Role
+from db import KycStatus, Market, OnboardingStatus, PlanTier, Role, SubscriptionStatus
 
 
 class Profile(BaseModel):
@@ -19,9 +19,23 @@ class Profile(BaseModel):
     region: str | None
     onboarding_status: OnboardingStatus
     kyc_status: KycStatus
+    plan: PlanTier
+    subscription_status: SubscriptionStatus
     live_enabled: bool
     roles: list[Role]
     created_at: datetime
+
+
+class EntitlementsView(BaseModel):
+    """The tenant's plan and what it permits (necessary, not sufficient — live
+    trading is still gated by KYC/policy + the validation gate + live_enabled)."""
+
+    plan: PlanTier
+    subscription_status: SubscriptionStatus
+    paper_trading: bool
+    live_trading: bool
+    markets: list[str]
+    max_live_capital_usd: float
 
 
 class RegionSelectRequest(BaseModel):

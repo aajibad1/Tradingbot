@@ -18,13 +18,14 @@ with no cloud deps — see auth.py and db.py.
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException
-from sqlalchemy import select
+from fastapi import Depends, FastAPI, HTTPException, Request
 from sqlalchemy.orm import Session
 
+import billing
 import onboarding
 from auth import Identity, current_identity
 from db import (
@@ -36,10 +37,17 @@ from db import (
     Tenant,
     User,
     UserRole,
+    WebhookEvent,
     get_session,
     init_db,
 )
-from models import KycSubmitRequest, OnboardingView, Profile, RegionSelectRequest
+from models import (
+    EntitlementsView,
+    KycSubmitRequest,
+    OnboardingView,
+    Profile,
+    RegionSelectRequest,
+)
 from shared.tenant import validate_tenant
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -72,6 +80,8 @@ def _to_profile(user: User) -> Profile:
         onboarding_status=t.onboarding_status,
         live_enabled=t.live_enabled,
         kyc_status=t.kyc_status,
+        plan=t.plan,
+        subscription_status=t.subscription_status,
         roles=sorted((r.role for r in user.roles), key=lambda role: role.value),
         created_at=user.created_at,
     )
@@ -218,3 +228,55 @@ def submit_onboarding(
     logger.info("tenant=%s onboarding -> %s (%s)", tenant.id,
                 decision.final_status.value, decision.reason)
     return _view(tenant, decision.required_controls)
+
+
+# --- billing ------------------------------------------------------------------
+
+@app.get("/v1/entitlements", response_model=EntitlementsView)
+def entitlements(
+    identity: Identity = Depends(current_identity),
+    db: Session = Depends(get_session),
+) -> EntitlementsView:
+    tenant = _require_tenant(db, identity)
+    ent = billing.entitlements_for(tenant.plan)
+    return EntitlementsView(
+        plan=tenant.plan,
+        subscription_status=tenant.subscription_status,
+        paper_trading=ent.paper_trading,
+        live_trading=ent.live_trading,
+        markets=ent.markets,
+        max_live_capital_usd=ent.max_live_capital_usd,
+    )
+
+
+@app.post("/webhooks/stripe")
+async def stripe_webhook(request: Request, db: Session = Depends(get_session)) -> dict[str, str]:
+    """Stripe subscription lifecycle → plan/entitlements. Signature-verified and
+    idempotent (deduped by Stripe event id)."""
+    secret = os.environ.get("STRIPE_WEBHOOK_SECRET")
+    if not secret:
+        raise HTTPException(status_code=503, detail="billing not configured (STRIPE_WEBHOOK_SECRET unset)")
+
+    payload = await request.body()
+    if not billing.verify_signature(payload, request.headers.get("Stripe-Signature"), secret):
+        raise HTTPException(status_code=400, detail="invalid Stripe signature")
+
+    import json
+    try:
+        event = json.loads(payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"bad JSON: {e}") from e
+
+    event_id = event.get("id")
+    if not event_id:
+        raise HTTPException(status_code=400, detail="event missing id")
+
+    # Idempotency: a redelivered event is a no-op.
+    if db.get(WebhookEvent, event_id) is not None:
+        return {"status": "duplicate", "id": event_id}
+    db.add(WebhookEvent(id=event_id, source="stripe", event_type=event.get("type", "")))
+
+    summary = billing.apply_event(db, event)
+    db.commit()
+    logger.info("stripe webhook %s", summary)
+    return {"status": "ok", "summary": summary}

@@ -4,6 +4,9 @@ Run: PYTHONPATH=.:services/core-api python3 -m pytest services/core-api/tests/ -
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import os
 import tempfile
 
@@ -12,11 +15,14 @@ from fastapi.testclient import TestClient
 
 from shared.tenant import validate_tenant
 
+_WHSEC = "whsec_test"
+
 
 @pytest.fixture()
 def client(monkeypatch):
     # Isolated SQLite file per test; local auth mode (no FIREBASE_PROJECT_ID).
     monkeypatch.delenv("FIREBASE_PROJECT_ID", raising=False)
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{path}")
@@ -126,6 +132,84 @@ def test_onboarding_view_tracks_next_action(client):
     v = client.get("/v1/onboarding", headers=h).json()
     assert v["onboarding_status"] == "account_created"
     assert v["next_actions"] == ["select_region"]
+
+
+# --- billing / entitlements ---------------------------------------------------
+
+def _mint(client, uid) -> str:
+    return client.post("/v1/sessions", headers=_auth(uid, f"{uid}@x.com")).json()["tenant_id"]
+
+
+def _sign(payload: bytes, t: str = "1700000000", secret: str = _WHSEC) -> str:
+    sig = hmac.new(secret.encode(), t.encode() + b"." + payload, hashlib.sha256).hexdigest()
+    return f"t={t},v1={sig}"
+
+
+def _event(etype, tenant_id, plan=None, event_id="evt_1", customer="cus_1") -> dict:
+    obj = {"customer": customer, "metadata": {"tenant_id": tenant_id}}
+    if plan:
+        obj["metadata"]["plan"] = plan
+    return {"id": event_id, "type": etype, "data": {"object": obj}}
+
+def _post_event(client, ev, sign_secret: str = _WHSEC):
+    payload = json.dumps(ev).encode()
+    return client.post("/webhooks/stripe", content=payload,
+                       headers={"Stripe-Signature": _sign(payload, secret=sign_secret)})
+
+
+def test_default_entitlements_are_free_paper_only(client):
+    h = _auth("bil-1", "g@x.com")
+    client.post("/v1/sessions", headers=h)
+    ent = client.get("/v1/entitlements", headers=h).json()
+    assert ent["plan"] == "free"
+    assert ent["paper_trading"] is True
+    assert ent["live_trading"] is False
+    assert ent["markets"] == []
+
+
+def test_pro_subscription_unlocks_live_and_both_markets(client):
+    tid = _mint(client, "bil-2")
+    r = _post_event(client, _event("checkout.session.completed", tid, plan="pro"))
+    assert r.status_code == 200, r.text
+    ent = client.get("/v1/entitlements", headers=_auth("bil-2")).json()
+    assert ent["plan"] == "pro"
+    assert ent["subscription_status"] == "active"
+    assert ent["live_trading"] is True
+    assert set(ent["markets"]) == {"global", "africa"}
+    assert ent["max_live_capital_usd"] == 100000.0
+
+
+def test_invalid_signature_is_rejected(client):
+    tid = _mint(client, "bil-3")
+    r = _post_event(client, _event("checkout.session.completed", tid, plan="pro"),
+                    sign_secret="wrong-secret")
+    assert r.status_code == 400
+    # plan unchanged
+    assert client.get("/v1/entitlements", headers=_auth("bil-3")).json()["plan"] == "free"
+
+
+def test_webhook_is_idempotent(client):
+    tid = _mint(client, "bil-4")
+    ev = _event("checkout.session.completed", tid, plan="pro", event_id="evt_dup")
+    assert _post_event(client, ev).json()["status"] == "ok"
+    assert _post_event(client, ev).json()["status"] == "duplicate"
+    assert client.get("/v1/entitlements", headers=_auth("bil-4")).json()["plan"] == "pro"
+
+
+def test_subscription_deleted_downgrades_to_free(client):
+    tid = _mint(client, "bil-5")
+    _post_event(client, _event("checkout.session.completed", tid, plan="pro", event_id="e1"))
+    _post_event(client, _event("customer.subscription.deleted", tid, event_id="e2"))
+    ent = client.get("/v1/entitlements", headers=_auth("bil-5")).json()
+    assert ent["plan"] == "free"
+    assert ent["subscription_status"] == "canceled"
+
+
+def test_webhook_503_when_unconfigured(client, monkeypatch):
+    monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
+    tid = _mint(client, "bil-6")
+    r = _post_event(client, _event("checkout.session.completed", tid, plan="pro"))
+    assert r.status_code == 503
 
 
 def test_local_mode_rejects_non_local_bearer(client):

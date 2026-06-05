@@ -9,8 +9,19 @@ CREATE TABLE IF NOT EXISTS tenants (
     region             VARCHAR(8),                        -- ISO country code (set at onboarding)
     onboarding_status  VARCHAR(24)  NOT NULL DEFAULT 'account_created',  -- see OnboardingStatus
     kyc_status         VARCHAR(16)  NOT NULL DEFAULT 'none',             -- none|pending|verified|rejected
+    plan               VARCHAR(16)  NOT NULL DEFAULT 'free',             -- free|starter|pro
+    subscription_status VARCHAR(16) NOT NULL DEFAULT 'none',            -- none|active|past_due|canceled
+    stripe_customer_id VARCHAR(64),
     live_enabled       BOOLEAN      NOT NULL DEFAULT FALSE,      -- paper until explicitly promoted
     created_at         TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_tenants_stripe_customer ON tenants(stripe_customer_id);
+
+CREATE TABLE IF NOT EXISTS webhook_events (
+    id          VARCHAR(128) PRIMARY KEY,                -- provider event id (idempotency)
+    source      VARCHAR(32)  NOT NULL,                   -- 'stripe' | 'clerk'
+    event_type  VARCHAR(64)  NOT NULL,
+    created_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS onboarding_events (
