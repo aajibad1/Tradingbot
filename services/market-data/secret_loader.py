@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 from functools import lru_cache
 
+from shared.tenant import DEFAULT_TENANT
+from shared.utils.secret_loader import get_exchange_credentials as _shared_get_exchange_credentials
 from shared.utils.secret_loader import get_secret as _shared_get_secret
 
 logger = logging.getLogger(__name__)
@@ -25,22 +27,11 @@ def get_secret(secret_id: str, version: str = "latest") -> str:
     return value
 
 
-def get_exchange_credentials(exchange: str) -> dict[str, str]:
-    """Returns {'apiKey': ..., 'secret': ..., 'password': ...} where applicable.
+def get_exchange_credentials(exchange: str, tenant_id: str = DEFAULT_TENANT) -> dict[str, str]:
+    """Per-tenant exchange credentials (delegates to the shared resolver).
 
-    Secret naming convention: `arb-<exchange>-{key,secret,password}`.
-    Withdrawal permissions MUST be disabled at the exchange when these keys
-    are issued — enforced at exchange level AND in Secret Manager IAM.
+    ``default`` tenant ⇒ shared platform keys (``arb-{ex}-key``); a user tenant
+    ⇒ that user's own keys (``user-{uid}-{ex}-key``). Withdrawal permissions MUST
+    be disabled when these keys are issued.
     """
-    exchange_l = exchange.lower().replace(".", "")
-    creds = {
-        "apiKey": get_secret(f"arb-{exchange_l}-key"),
-        "secret": get_secret(f"arb-{exchange_l}-secret"),
-    }
-    # Coinbase Advanced + Kraken use a passphrase / API password
-    if exchange_l in {"coinbase", "kraken"}:
-        try:
-            creds["password"] = get_secret(f"arb-{exchange_l}-password")
-        except RuntimeError:
-            logger.info("no password secret for %s — proceeding without", exchange_l)
-    return creds
+    return _shared_get_exchange_credentials(exchange, tenant_id)
