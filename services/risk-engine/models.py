@@ -4,10 +4,12 @@ from pydantic import BaseModel, Field
 
 from shared.models.opportunity import Opportunity
 from shared.models.risk_state import RiskViolation
+from shared.tenant import DEFAULT_TENANT
 
 
 class EvaluateRequest(BaseModel):
     opportunity: Opportunity
+    tenant_id: str = Field(default=DEFAULT_TENANT, description="User/tenant whose risk state to evaluate against")
 
 
 class EvaluateResponse(BaseModel):

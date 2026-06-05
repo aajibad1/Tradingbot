@@ -24,6 +24,7 @@ import httpx
 import state as state_module
 from shared.models.risk_state import KillSwitchState
 from shared.pubsub.publisher import Topic, get_publisher
+from shared.tenant import DEFAULT_TENANT
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -32,22 +33,30 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def is_kill_switch_active(redis: Redis) -> bool:
-    """True iff the kill switch is currently engaged."""
-    return redis.get(state_module.KEY_KILL_ACTIVE) == "1"
+def is_kill_switch_active(redis: Redis, tenant_id: str = DEFAULT_TENANT) -> bool:
+    """True iff trading is halted for this tenant.
+
+    The PLATFORM kill switch (set by an admin / global control) halts every
+    tenant; a tenant's own kill switch halts only that tenant. Either trips it.
+    """
+    if state_module.is_platform_kill_switch_active(redis):
+        return True
+    return redis.get(state_module.kill_active_key(tenant_id)) == "1"
 
 
-def trigger_kill_switch(redis: Redis, triggered_by: str, reason: str) -> KillSwitchState:
-    """Trip the kill switch and fan out alerts.
+def trigger_kill_switch(
+    redis: Redis, triggered_by: str, reason: str, tenant_id: str = DEFAULT_TENANT
+) -> KillSwitchState:
+    """Trip the tenant's kill switch and fan out alerts.
 
     Idempotent: if already active, returns the persisted state without
     re-alerting. Slack / Pub/Sub failures are swallowed — the Redis write is
     the contract, side-channels are best-effort.
     """
-    if is_kill_switch_active(redis):
-        return state_module.load_kill_switch(redis)
+    if redis.get(state_module.kill_active_key(tenant_id)) == "1":
+        return state_module.load_kill_switch(redis, tenant_id)
 
-    new_state = state_module.set_kill_switch(redis, triggered_by, reason)
+    new_state = state_module.set_kill_switch(redis, triggered_by, reason, tenant_id)
     triggered_iso = (
         new_state.triggered_at.isoformat()
         if new_state.triggered_at
@@ -75,8 +84,10 @@ def trigger_kill_switch(redis: Redis, triggered_by: str, reason: str) -> KillSwi
     return new_state
 
 
-def clear_kill_switch(redis: Redis, auth_token: str, reset_by: str) -> KillSwitchState:
-    """Reset the kill switch. Requires KILL_SWITCH_RESET_TOKEN to match.
+def clear_kill_switch(
+    redis: Redis, auth_token: str, reset_by: str, tenant_id: str = DEFAULT_TENANT
+) -> KillSwitchState:
+    """Reset the tenant's kill switch. Requires KILL_SWITCH_RESET_TOKEN to match.
 
     Raises:
         RuntimeError: if the env-var is unset (mis-configured deployment).
@@ -94,7 +105,7 @@ def clear_kill_switch(redis: Redis, auth_token: str, reset_by: str) -> KillSwitc
         )
         raise PermissionError("invalid auth_token")
 
-    state_module.clear_kill_switch(redis)
+    state_module.clear_kill_switch(redis, tenant_id)
     logger.warning("kill_switch reset reset_by=%s", reset_by)
     _send_slack_alert(f":white_check_mark: Kill switch reset by `{reset_by}`")
     return KillSwitchState(active=False)
