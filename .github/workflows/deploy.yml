@@ -40,6 +40,7 @@ jobs:
           - execution-orchestrator
           - sentiment-service
           - dashboard-api
+          - notification-dispatcher
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
     steps:

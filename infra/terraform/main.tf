@@ -169,6 +169,15 @@ locals {
       subscribe_subs = []
       cpu_idle       = true
     }
+    # Notification dispatcher — country-routed WhatsApp/Telegram/SMS alerts with
+    # channel fallback. Provider creds (Telegram/Twilio) added to `secrets` when
+    # populated; degrades gracefully (no provider → reports undelivered).
+    "notification-dispatcher" = {
+      secrets        = []
+      publish_topics = []
+      subscribe_subs = []
+      cpu_idle       = true
+    }
     # Dashboard-api — the only browser-facing service. Aggregates Redis +
     # BigQuery into one /api/summary endpoint and serves the static dashboard.
     # Public (allUsers/run.invoker) so a browser can hit it without an ID
