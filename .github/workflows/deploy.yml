@@ -41,6 +41,7 @@ jobs:
           - sentiment-service
           - dashboard-api
           - notification-dispatcher
+          - fx-rate-service
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
     steps:

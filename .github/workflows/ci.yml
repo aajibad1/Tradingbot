@@ -92,6 +92,7 @@ jobs:
           - execution-orchestrator
           - sentiment-service
           - notification-dispatcher
+          - fx-rate-service
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -128,6 +129,7 @@ jobs:
           - execution-orchestrator
           - sentiment-service
           - notification-dispatcher
+          - fx-rate-service
     services:
       redis:
         image: redis:7
@@ -226,6 +228,7 @@ jobs:
           - execution-orchestrator
           - sentiment-service
           - notification-dispatcher
+          - fx-rate-service
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3

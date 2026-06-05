@@ -178,6 +178,16 @@ locals {
       subscribe_subs = []
       cpu_idle       = true
     }
+    # FX rate service — local-currency P&L (ZAR/NGN/KES) + Nigeria multi-rate.
+    # Keyless by default (free fallback provider); add OPEN_EXCHANGE_RATES_APP_ID
+    # to `secrets` once populated for the higher-quality primary. Redis-cached;
+    # refreshed every minute by Cloud Scheduler.
+    "fx-rate-service" = {
+      secrets        = []
+      publish_topics = []
+      subscribe_subs = []
+      cpu_idle       = true
+    }
     # Dashboard-api — the only browser-facing service. Aggregates Redis +
     # BigQuery into one /api/summary endpoint and serves the static dashboard.
     # Public (allUsers/run.invoker) so a browser can hit it without an ID
@@ -449,6 +459,48 @@ resource "google_cloud_scheduler_job" "risk_daily_reset" {
   }
 
   depends_on = [google_cloud_run_service_iam_member.risk_reset_invoker]
+}
+
+# ---------------------------------------------------------------------------
+# Cloud Scheduler — refresh FX rates every minute (FX-01, ≤60s freshness).
+# ---------------------------------------------------------------------------
+resource "google_service_account" "fx_scheduler" {
+  account_id   = "fx-scheduler-${var.environment}"
+  display_name = "Cloud Scheduler invoker for fx-rate-service"
+  project      = var.project_id
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_cloud_run_service_iam_member" "fx_invoker" {
+  project  = var.project_id
+  location = var.region
+  service  = "fx-rate-service"
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.fx_scheduler.email}"
+
+  depends_on = [module.cloud_run]
+}
+
+resource "google_cloud_scheduler_job" "fx_refresh" {
+  name        = "fx-refresh-${var.environment}"
+  description = "Refresh local-currency FX rates in Redis every minute."
+  schedule    = "* * * * *"
+  time_zone   = "Etc/UTC"
+  project     = var.project_id
+  region      = var.region
+
+  http_target {
+    http_method = "POST"
+    uri         = "${module.cloud_run["fx-rate-service"].service_url}/refresh"
+
+    oidc_token {
+      service_account_email = google_service_account.fx_scheduler.email
+      audience              = module.cloud_run["fx-rate-service"].service_url
+    }
+  }
+
+  depends_on = [google_cloud_run_service_iam_member.fx_invoker]
 }
 
 # ---------------------------------------------------------------------------
