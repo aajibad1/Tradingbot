@@ -3,6 +3,8 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from shared.tenant import DEFAULT_TENANT
+
 
 class StrategyType(str, Enum):
     FUNDING_RATE_ARB = "funding_rate_arb"
@@ -15,6 +17,7 @@ class Opportunity(BaseModel):
     """Scored arbitrage opportunity emitted by opportunity-engine."""
 
     id: str = Field(description="UUID assigned at detection time")
+    user_id: str = Field(default=DEFAULT_TENANT, description="Owning tenant/user")
     strategy: StrategyType
     asset: str = Field(description="Base symbol, e.g. 'BTC'")
     long_exchange: str

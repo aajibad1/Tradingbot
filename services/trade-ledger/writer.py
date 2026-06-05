@@ -77,6 +77,7 @@ def trade_to_row(trade: Trade) -> dict:
     asset = trade.legs[0].asset if trade.legs else ""
     return {
         "trade_id": trade.id,
+        "user_id": trade.user_id,
         "opportunity_id": trade.opportunity_id,
         "trade_type": trade.type.value,
         "status": trade.status.value,
@@ -110,6 +111,7 @@ def trade_to_row(trade: Trade) -> dict:
 def opportunity_to_row(opp: Opportunity) -> dict:
     return {
         "opportunity_id": opp.id,
+        "user_id": opp.user_id,
         "strategy": opp.strategy.value,
         "asset": opp.asset,
         "long_exchange": opp.long_exchange,

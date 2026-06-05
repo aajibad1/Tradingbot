@@ -1,6 +1,7 @@
 -- Trade ledger: every paper + live fill. 7-year retention for tax (Form 8949).
 CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.arb_trading.trades` (
   trade_id            STRING    NOT NULL,
+  user_id             STRING    NOT NULL,  -- owning tenant/user
   opportunity_id      STRING    NOT NULL,
   trade_type          STRING    NOT NULL,  -- 'paper' | 'live'
   status              STRING    NOT NULL,  -- 'open' | 'closed' | 'failed'
@@ -28,4 +29,4 @@ CREATE TABLE IF NOT EXISTS `${PROJECT_ID}.arb_trading.trades` (
   ingested_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP()
 )
 PARTITION BY DATE(opened_at)
-CLUSTER BY trade_type, asset;
+CLUSTER BY user_id, trade_type, asset;

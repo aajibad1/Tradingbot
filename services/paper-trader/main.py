@@ -163,6 +163,7 @@ def _simulate_internal(req: SimulateRequest) -> Trade | None:
 
     trade = Trade(
         id=new_trade_id(),
+        user_id=req.opportunity.user_id,
         opportunity_id=req.opportunity.id,
         type=TradeType.PAPER,
         legs=[long_leg.leg, short_leg.leg],

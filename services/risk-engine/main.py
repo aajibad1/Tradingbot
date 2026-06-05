@@ -34,10 +34,11 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 import position_tracker
+from shared.tenant import DEFAULT_TENANT
 from models import (
     EvaluateRequest,
     EvaluateResponse,
@@ -56,7 +57,14 @@ from rules.kill_switch import (
 from rules.liquidation_monitor import check_liquidations, scan as scan_liquidations
 from rules.position_limits import check_position_limits
 from rules.sentiment_gate import check_sentiment
-from state import get_redis, load_state, reset_daily_pnl
+from state import (
+    clear_platform_kill_switch,
+    get_redis,
+    is_platform_kill_switch_active,
+    load_state,
+    reset_daily_pnl,
+    set_platform_kill_switch,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -73,7 +81,8 @@ def _on_trade_fill(message) -> None:
     """Fold an inbound Trade fill into the Redis risk state."""
     try:
         trade = Trade.model_validate_json(message.data)
-        position_tracker.apply_trade(get_redis(), trade)
+        # Route the fill to its owning tenant's risk state.
+        position_tracker.apply_trade(get_redis(), trade, trade.user_id)
         message.ack()
     except Exception:
         logger.exception("failed to apply trade fill to risk state")
@@ -198,27 +207,28 @@ def get_capital_validation() -> dict:
 @app.post("/evaluate", response_model=EvaluateResponse)
 def evaluate(req: EvaluateRequest) -> EvaluateResponse:
     redis = get_redis()
+    tenant = req.tenant_id
 
-    # Stage 1: kill switch short-circuits everything.
-    if is_kill_switch_active(redis):
+    # Stage 1: kill switch short-circuits everything (platform OR this tenant).
+    if is_kill_switch_active(redis, tenant):
         logger.info(
-            "opportunity rejected id=%s reason=kill_switch_active",
-            req.opportunity.id,
+            "opportunity rejected id=%s tenant=%s reason=kill_switch_active",
+            req.opportunity.id, tenant,
         )
         return EvaluateResponse(approved=False, violations=[], kill_switch_active=True)
 
-    state = load_state(redis)
+    state = load_state(redis, tenant)
 
     # Stage 2: position limits (size, exchange/asset exposure, leverage, min edge).
     violations = []
     violations.extend(check_position_limits(req.opportunity, state, DEFAULT_LIMITS))
 
-    # Stage 3: drawdown — a breach trips the kill switch synchronously, so
-    # downstream callers see kill_switch_active=True on the very next call.
+    # Stage 3: drawdown — a breach trips the tenant's kill switch synchronously,
+    # so downstream callers see kill_switch_active=True on the very next call.
     drawdown_violation = check_drawdown(state, DEFAULT_LIMITS)
     if drawdown_violation:
         violations.append(drawdown_violation)
-        kill_switch_trigger(redis, "risk-engine", drawdown_violation.message)
+        kill_switch_trigger(redis, "risk-engine", drawdown_violation.message, tenant)
 
     # Stage 4: liquidation distance on any open perp. Critical → kill switch.
     liq_violations, liq_checks = check_liquidations(redis)
@@ -228,7 +238,7 @@ def evaluate(req: EvaluateRequest) -> EvaluateResponse:
         # Use the first critical position for the kill reason — operators can
         # see the rest in /liquidations.
         c = critical_liqs[0]
-        kill_switch_trigger(redis, "risk-engine", c.message())
+        kill_switch_trigger(redis, "risk-engine", c.message(), tenant)
 
     # Stage 5: sentiment gate (fail-open soft gate; never trips kill switch).
     # The sentiment-service is the sole writer of sentiment:*. Missing or
@@ -257,7 +267,7 @@ def evaluate(req: EvaluateRequest) -> EvaluateResponse:
     return EvaluateResponse(
         approved=approved,
         violations=violations,
-        kill_switch_active=is_kill_switch_active(redis),
+        kill_switch_active=is_kill_switch_active(redis, tenant),
     )
 
 
@@ -293,26 +303,51 @@ def admin_reset(req: KillSwitchResetRequest) -> dict:
 
 
 @app.post("/positions/apply-fill")
-def apply_fill(trade: Trade) -> dict:
-    """Fold a Trade fill into the risk state.
+def apply_fill(trade: Trade, tenant_id: str = Query(default=DEFAULT_TENANT)) -> dict:
+    """Fold a Trade fill into a tenant's risk state.
 
     Same code path as the arb-trade-fills subscriber — exposed so local/dev
     runs (and tests) can drive risk state without Pub/Sub, and so ops can
     replay a fill manually if needed.
     """
     redis = get_redis()
-    position_tracker.apply_trade(redis, trade)
-    return load_state(redis).model_dump(mode="json")
+    position_tracker.apply_trade(redis, trade, tenant_id)
+    return load_state(redis, tenant_id).model_dump(mode="json")
 
 
 @app.post("/positions/reset-daily")
-def positions_reset_daily() -> dict:
-    """Reset risk:daily_pnl_usd to 0 — intended for a UTC-midnight scheduler.
+def positions_reset_daily(tenant_id: str = Query(default=DEFAULT_TENANT)) -> dict:
+    """Reset a tenant's risk:daily_pnl to 0 — intended for a UTC-midnight scheduler.
 
     Without a periodic reset the drawdown guard's daily-loss window would
     accumulate forever. The Cloud Scheduler job that calls this is defined in
     infra (see deploy notes).
     """
     redis = get_redis()
-    reset_daily_pnl(redis)
-    return load_state(redis).model_dump(mode="json")
+    reset_daily_pnl(redis, tenant_id)
+    return load_state(redis, tenant_id).model_dump(mode="json")
+
+
+@app.post("/admin/platform-kill-switch/trigger")
+def platform_kill_trigger(req: KillSwitchTriggerRequest) -> dict:
+    """Trip the PLATFORM-wide kill switch — halts trading for EVERY tenant.
+
+    The big red button (FRD ADMIN-01). Independent of any tenant's own switch.
+    """
+    redis = get_redis()
+    set_platform_kill_switch(redis, req.triggered_by, req.reason)
+    return {"platform_kill_switch_active": True, "reason": req.reason}
+
+
+@app.post("/admin/platform-kill-switch/reset")
+def platform_kill_reset(req: KillSwitchResetRequest) -> dict:
+    """Clear the platform-wide kill switch. Requires KILL_SWITCH_RESET_TOKEN."""
+    import os
+    expected = os.environ.get("KILL_SWITCH_RESET_TOKEN")
+    if not expected:
+        raise HTTPException(status_code=500, detail="KILL_SWITCH_RESET_TOKEN unset")
+    if not req.auth_token or req.auth_token != expected:
+        raise HTTPException(status_code=403, detail="invalid auth_token")
+    redis = get_redis()
+    clear_platform_kill_switch(redis)
+    return {"platform_kill_switch_active": is_platform_kill_switch_active(redis)}

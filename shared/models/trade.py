@@ -3,6 +3,8 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from shared.tenant import DEFAULT_TENANT
+
 
 class TradeType(str, Enum):
     PAPER = "paper"
@@ -28,6 +30,7 @@ class TradeLeg(BaseModel):
 
 class Trade(BaseModel):
     id: str
+    user_id: str = Field(default=DEFAULT_TENANT, description="Owning tenant/user")
     opportunity_id: str
     type: TradeType
     legs: list[TradeLeg]

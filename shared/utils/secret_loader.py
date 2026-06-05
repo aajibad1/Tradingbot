@@ -26,6 +26,8 @@ from __future__ import annotations
 import logging
 import os
 
+from shared.tenant import DEFAULT_TENANT, exchange_secret_id
+
 logger = logging.getLogger(__name__)
 
 
@@ -70,3 +72,29 @@ def get_secret(secret_id: str, version: str = "latest", *, required: bool = Fals
     except Exception as e:  # noqa: BLE001 — degrade gracefully on a fetch error
         logger.warning("failed to fetch secret %r: %s", secret_id, e)
         return None
+
+
+def get_exchange_credentials(exchange: str, tenant_id: str = DEFAULT_TENANT) -> dict[str, str]:
+    """Resolve an exchange's API credentials for a tenant — fail loud if missing.
+
+    - ``default`` tenant → the shared platform secrets (``arb-{ex}-key`` …),
+      i.e. today's single-tenant behaviour.
+    - a user tenant → THAT user's own secrets (``user-{uid}-{ex}-key`` …) with
+      **no cross-tenant fallback** — a user trades only with their own keys
+      (CS-04 / SEC-10 per-user secret isolation).
+
+    Withdrawal permissions MUST be disabled at the exchange when these keys are
+    issued (enforced at the exchange + Secret Manager IAM). ``key``/``secret``
+    are required; the Coinbase/Kraken passphrase is optional.
+    """
+    ex = exchange.lower().replace(".", "")
+    creds: dict[str, str] = {
+        "apiKey": get_secret(exchange_secret_id(exchange, "key", tenant_id), required=True),  # type: ignore[dict-item]
+        "secret": get_secret(exchange_secret_id(exchange, "secret", tenant_id), required=True),  # type: ignore[dict-item]
+    }
+    if ex in {"coinbase", "kraken"}:
+        try:
+            creds["password"] = get_secret(exchange_secret_id(exchange, "password", tenant_id), required=True)  # type: ignore[assignment]
+        except RuntimeError:
+            logger.info("no passphrase secret for %s/%s — proceeding without", tenant_id, ex)
+    return creds

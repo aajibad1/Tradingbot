@@ -25,6 +25,7 @@ import logging
 
 import state as state_module
 from shared.models.trade import Trade, TradeStatus
+from shared.tenant import DEFAULT_TENANT
 
 if False:  # TYPE_CHECKING without importing redis at runtime
     from redis import Redis
@@ -47,9 +48,9 @@ def _position_notionals(trade: Trade) -> tuple[dict[str, float], float]:
     return exposure, position_notional
 
 
-def apply_trade(redis: Redis, trade: Trade) -> None:
+def apply_trade(redis: Redis, trade: Trade, tenant_id: str = DEFAULT_TENANT) -> None:
     """Fold one trade fill into the Redis risk state. Sole writer of risk:* keys."""
-    capital = float(redis.get(state_module.KEY_CAPITAL) or 0.0)
+    capital = float(redis.get(state_module.risk_key("capital_usd", tenant_id)) or 0.0)
     if capital <= 0:
         # Without capital we cannot express exposure as a pct; realize PnL only
         # (the drawdown guard reads pct, but capital must be set before /evaluate
@@ -64,7 +65,7 @@ def apply_trade(redis: Redis, trade: Trade) -> None:
         concentration_pct = position_notional / capital * 100.0
         asset = trade.legs[0].asset if trade.legs else "UNKNOWN"
         state_module.record_open_position(
-            redis, trade.opportunity_id, asset, exposure_pct, concentration_pct
+            redis, trade.opportunity_id, asset, exposure_pct, concentration_pct, tenant_id
         )
         logger.info(
             "position opened opp=%s exposure_pct=%s concentration_pct=%.3f",
@@ -73,10 +74,10 @@ def apply_trade(redis: Redis, trade: Trade) -> None:
         return
 
     # CLOSED or FAILED — unwind any tracked exposure first.
-    released = state_module.release_position(redis, trade.opportunity_id)
+    released = state_module.release_position(redis, trade.opportunity_id, tenant_id)
 
     if trade.status is TradeStatus.CLOSED:
-        new_total = state_module.incr_daily_pnl(redis, trade.net_pnl_usd)
+        new_total = state_module.incr_daily_pnl(redis, trade.net_pnl_usd, tenant_id)
         logger.info(
             "trade closed opp=%s net_pnl=%.2f daily_pnl=%.2f released_open=%s",
             trade.opportunity_id, trade.net_pnl_usd, new_total, released,
