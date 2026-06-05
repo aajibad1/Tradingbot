@@ -1,25 +1,28 @@
 #!/usr/bin/env python3
 """Historical backtest of the funding-rate carry strategy on REAL funding data.
 
-Pulls real hyperliquid funding history (free, public), then walks non-overlapping
-carry windows: at each window start it makes the REAL entry decision
-(calculate_net_edge with the multi-period model + 0.6 persistence haircut + 72h
-hold), and for the windows it would enter, computes realized PnL from the ACTUAL
-subsequent funding over the hold (signed — funding can flip against you) minus
-round-trip costs.
+Pulls real hyperliquid funding history (free, public), then walks carry windows:
+at each window start it makes the REAL entry decision (calculate_net_edge with
+the multi-period model + 0.6 persistence haircut + 72h hold), and for the windows
+it would enter, computes realized PnL from the ACTUAL subsequent funding over the
+hold (signed — funding can flip against you) minus round-trip costs.
 
 This is the first real-data profitability signal for carry, and it measures the
 EMPIRICAL funding persistence so the synthetic 0.6 haircut can be re-calibrated.
 
-Run:  PYTHONPATH=. python3 scripts/backtest_funding.py [--days 45]
+The engine is exposed as ``run_backtest()`` (returns timestamped ``Trade`` records)
+so the stage-1 validation gate (``scripts/validate_strategy.py``) can compute
+Sharpe / drawdown / PASS-FAIL on top of the same entry logic — one source of
+truth for the strategy decision.
+
+Run:  PYTHONPATH=. python3 scripts/backtest_funding.py [--days 45] [--assets BTC,ETH]
 """
 from __future__ import annotations
 
 import argparse
 import statistics
 import time
-
-import ccxt
+from dataclasses import dataclass, field
 
 from shared.utils.fee_calculator import calculate_net_edge, taker_fee_bps
 from shared.utils.slippage_model import estimate_size_tier_bps
@@ -37,8 +40,43 @@ SHORT_FEE = taker_fee_bps("hyperliquid")
 ROUND_TRIP_BPS = LONG_FEE + SHORT_FEE + 2 * SLIP + 3.0
 
 
-def fetch_funding_series(asset: str, days: int) -> list[float]:
-    """Return an ordered list of hourly funding rates (decimal/period) for the window."""
+@dataclass
+class Trade:
+    """One realized carry position."""
+    asset: str
+    entry_ts_ms: int
+    pnl_bps: float               # realized funding minus round-trip cost (signed)
+    realized_funding_bps: float  # actual signed funding collected over the hold
+    credited_bps: float          # un-haircut entry credit (for persistence calc)
+
+
+@dataclass
+class AssetSummary:
+    hrs: int
+    apr_min: float
+    apr_max: float
+    apr_median: float
+    entered: int
+    mean_pnl_bps: float | None
+
+
+@dataclass
+class BacktestResult:
+    trades: list[Trade] = field(default_factory=list)
+    per_asset: dict[str, AssetSummary] = field(default_factory=dict)
+    total_windows: int = 0
+    pos_windows: int = 0
+    total_viable: int = 0
+    days: int = 0
+    size_usd: float = SIZE_USD
+    round_trip_bps: float = ROUND_TRIP_BPS
+
+
+def fetch_funding_series(asset: str, days: int) -> list[tuple[int, float]]:
+    """Return ordered ``(timestamp_ms, funding_rate)`` pairs for the window
+    (hourly funding, decimal/period)."""
+    import ccxt
+
     ex = ccxt.hyperliquid({"timeout": 10000, "enableRateLimit": True})
     sym = f"{asset}/USDC:USDC"
     since = ex.milliseconds() - days * 86_400_000
@@ -57,7 +95,7 @@ def fetch_funding_series(asset: str, days: int) -> list[float]:
         if since >= ex.milliseconds() - 3_600_000:
             break
         time.sleep(ex.rateLimit / 1000)
-    return [rate for _, rate in sorted(by_ts.items())]
+    return sorted(by_ts.items())
 
 
 def gate_viable(entry_rate: float) -> tuple[float, bool]:
@@ -72,6 +110,50 @@ def gate_viable(entry_rate: float) -> tuple[float, bool]:
     return r["net_edge_bps"], r["is_viable"]
 
 
+def run_backtest(assets: list[str], days: int,
+                 fetch=fetch_funding_series) -> BacktestResult:
+    """Walk the real funding series and return every realized carry trade.
+
+    ``fetch`` is injectable so tests can feed synthetic series without network.
+    The entry policy (continuous hourly entry, one position at a time per asset,
+    positive-funding carry only) mirrors the live strategy.
+    """
+    res = BacktestResult(days=days)
+    for asset in assets:
+        series = fetch(asset, days)
+        rates = [r for _, r in series]
+        ts = [t for t, _ in series]
+        if len(rates) < HOLD_HOURS + 1:
+            continue
+        aprs = [r * 8760 * 100 for r in rates]
+        a_pnl: list[float] = []
+        i, n = 0, len(rates) - HOLD_HOURS
+        while i < n:
+            res.total_windows += 1
+            entry_rate = rates[i]
+            if entry_rate <= 0:           # positive-funding carry only (short perp collects)
+                i += 1
+                continue
+            res.pos_windows += 1
+            _, viable = gate_viable(entry_rate)
+            if not viable:
+                i += 1
+                continue
+            res.total_viable += 1
+            realized_funding_bps = sum(rates[i:i + HOLD_HOURS]) * 10_000.0   # signed actual
+            pnl = realized_funding_bps - ROUND_TRIP_BPS
+            credited = entry_rate * 10_000.0 * HOLD_HOURS                    # un-haircut entry credit
+            res.trades.append(Trade(asset, ts[i], pnl, realized_funding_bps, credited))
+            a_pnl.append(pnl)
+            i += HOLD_HOURS               # locked in the position for the hold
+        res.per_asset[asset] = AssetSummary(
+            hrs=len(rates), apr_min=min(aprs), apr_max=max(aprs),
+            apr_median=statistics.median(aprs), entered=len(a_pnl),
+            mean_pnl_bps=statistics.mean(a_pnl) if a_pnl else None,
+        )
+    return res
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=45)
@@ -83,51 +165,26 @@ def main() -> None:
     print(f"Round-trip cost assumed: {ROUND_TRIP_BPS:.1f} bps "
           f"(long {LONG_SPOT_VENUE} {LONG_FEE:.0f} + short HL {SHORT_FEE:.0f} + slip {2*SLIP:.0f} + buffer 3)\n")
 
-    all_pnl, all_persist, total_windows, total_viable, pos_windows = [], [], 0, 0, 0
+    res = run_backtest(assets, args.days)
     for asset in assets:
-        rates = fetch_funding_series(asset, args.days)
-        if len(rates) < HOLD_HOURS + 1:
-            print(f"{asset:4} insufficient history ({len(rates)} hrs)")
+        s = res.per_asset.get(asset)
+        if s is None:
+            print(f"{asset:4} insufficient history")
             continue
-        # annualized APR series for context
-        aprs = [r * 8760 * 100 for r in rates]
-        # Continuous hourly entry, one position at a time: when flat, enter the
-        # moment funding clears the bar, hold HOLD_HOURS, then go flat. This is
-        # how the live strategy behaves and is the only way to catch transient
-        # funding spikes (a 72h grid misses spikes that don't land on a boundary).
-        a_pnl = []
-        i, n = 0, len(rates) - HOLD_HOURS
-        while i < n:
-            total_windows += 1
-            entry_rate = rates[i]
-            if entry_rate <= 0:           # positive-funding carry only (short perp collects)
-                i += 1
-                continue
-            pos_windows += 1
-            _, viable = gate_viable(entry_rate)
-            if not viable:
-                i += 1
-                continue
-            total_viable += 1
-            realized_funding_bps = sum(rates[i:i + HOLD_HOURS]) * 10_000.0   # signed actual
-            pnl = realized_funding_bps - ROUND_TRIP_BPS
-            credited = entry_rate * 10_000.0 * HOLD_HOURS                    # un-haircut entry credit
-            a_pnl.append(pnl)
-            all_pnl.append(pnl)
-            if credited > 0:
-                all_persist.append(realized_funding_bps / credited)
-            i += HOLD_HOURS               # locked in the position for the hold
-        hrs = len(rates)
-        print(f"{asset:4} {hrs:>5} hrs  APR range [{min(aprs):+.0f}%, {max(aprs):+.0f}%]  "
-              f"median {statistics.median(aprs):+.1f}%  | entered {len(a_pnl)}"
-              + (f", realized mean {statistics.mean(a_pnl):+.1f} bps" if a_pnl else ""))
+        print(f"{asset:4} {s.hrs:>5} hrs  APR range [{s.apr_min:+.0f}%, {s.apr_max:+.0f}%]  "
+              f"median {s.apr_median:+.1f}%  | entered {s.entered}"
+              + (f", realized mean {s.mean_pnl_bps:+.1f} bps" if s.mean_pnl_bps is not None else ""))
+
+    all_pnl = [t.pnl_bps for t in res.trades]
+    all_persist = [t.realized_funding_bps / t.credited_bps
+                   for t in res.trades if t.credited_bps > 0]
 
     print("\n" + "=" * 64)
     print(f"Backtest window: ~{args.days} days, {HOLD_HOURS}h non-overlapping carry windows")
-    print(f"  hourly entry checks (while flat): {total_windows}")
-    print(f"  positive-funding checks         : {pos_windows}")
-    print(f"  entries (cleared the bar)       : {total_viable}"
-          + (f"  ({total_viable/pos_windows:.2%} of positive)" if pos_windows else ""))
+    print(f"  hourly entry checks (while flat): {res.total_windows}")
+    print(f"  positive-funding checks         : {res.pos_windows}")
+    print(f"  entries (cleared the bar)       : {res.total_viable}"
+          + (f"  ({res.total_viable/res.pos_windows:.2%} of positive)" if res.pos_windows else ""))
     if all_pnl:
         wins = sum(1 for p in all_pnl if p > 0)
         print(f"\n  TRADED carry windows ({len(all_pnl)}):")
