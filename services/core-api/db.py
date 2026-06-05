@@ -43,9 +43,25 @@ class Market(str, Enum):
 
 
 class OnboardingStatus(str, Enum):
-    STARTED = "started"            # signed in; KYC/region not yet submitted
-    PENDING_REVIEW = "pending_review"  # submitted; policy needs a human/async check
-    TRADING_READY = "trading_ready"    # cleared policy; may trade (paper by default)
+    """Onboarding state machine (canonical states from the product brief).
+    Transitions are enforced in onboarding.py; not every state is wired yet
+    (billing/funding land with Stripe + the custody decision)."""
+    ACCOUNT_CREATED = "account_created"      # signed in; tenant minted
+    IDENTITY_PENDING = "identity_pending"    # region chosen; KYC in progress
+    IDENTITY_VERIFIED = "identity_verified"  # KYC cleared
+    BILLING_PENDING = "billing_pending"      # awaiting subscription (Stripe — later)
+    BILLING_ACTIVE = "billing_active"        # subscription active (later)
+    FUNDING_PENDING = "funding_pending"      # awaiting funding/key-link (later)
+    REVIEW_PENDING = "review_pending"        # policy needs a human/async check
+    TRADING_READY = "trading_ready"          # cleared policy; may trade (paper by default)
+    RESTRICTED = "restricted"                # blocked by policy (jurisdiction/sanctions)
+
+
+class KycStatus(str, Enum):
+    NONE = "none"
+    PENDING = "pending"
+    VERIFIED = "verified"
+    REJECTED = "rejected"
 
 
 class Role(str, Enum):
@@ -68,12 +84,16 @@ class Tenant(Base):
     market: Mapped[Market | None] = mapped_column(_enum_col(Market), nullable=True)
     region: Mapped[str | None] = mapped_column(String(8), nullable=True)  # ISO country, set at onboarding
     onboarding_status: Mapped[OnboardingStatus] = mapped_column(
-        _enum_col(OnboardingStatus), default=OnboardingStatus.STARTED
+        _enum_col(OnboardingStatus), default=OnboardingStatus.ACCOUNT_CREATED
     )
+    kyc_status: Mapped[KycStatus] = mapped_column(_enum_col(KycStatus), default=KycStatus.NONE)
     live_enabled: Mapped[bool] = mapped_column(default=False)  # paper until explicitly promoted
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
 
     users: Mapped[list["User"]] = relationship(back_populates="tenant")
+    events: Mapped[list["OnboardingEvent"]] = relationship(
+        back_populates="tenant", cascade="all, delete-orphan"
+    )
 
 
 class User(Base):
@@ -97,6 +117,23 @@ class UserRole(Base):
     role: Mapped[Role] = mapped_column(_enum_col(Role), primary_key=True)
 
     user: Mapped[User] = relationship(back_populates="roles")
+
+
+class OnboardingEvent(Base):
+    """Append-only audit of onboarding actions/transitions. Doubles as the raw
+    substrate for later analytics (region-approval times, drop-off, ML labels)."""
+
+    __tablename__ = "onboarding_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    action: Mapped[str] = mapped_column(String(64))               # e.g. 'region.selected'
+    from_status: Mapped[OnboardingStatus | None] = mapped_column(_enum_col(OnboardingStatus), nullable=True)
+    to_status: Mapped[OnboardingStatus | None] = mapped_column(_enum_col(OnboardingStatus), nullable=True)
+    detail: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+
+    tenant: Mapped[Tenant] = relationship(back_populates="events")
 
 
 _engine = None

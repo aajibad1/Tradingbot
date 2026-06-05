@@ -101,16 +101,25 @@ policy eval → trading_ready | pending_review`. A connected exchange defaults t
 The Clerk/AI brief diverges from decisions already baked into this repo. Three
 are consequential; do not let them slide in silently:
 
-1. **Custody model — the big one.** The brief says *"users do not bring exchange
+1. **Custody model — DECIDED: managed custody.** *"Users do not bring exchange
    API keys; the platform owns the integrations through backend-managed
-   credentials."* This **reverses** `EXCHANGE_ONBOARDING.md`, which is explicitly
-   **non-custodial** *because* a custodial / platform-keyed model implies
-   **money-transmitter / VASP licensing** and (for a pooled book) destroys a thin
-   net edge. Platform-managed custody is a licensing + treasury + segregation
-   decision, not a coding one. **Recommendation:** stay non-custodial
-   (user-linked, withdrawal-disabled keys via `account-link-service`) for launch;
-   treat managed custody as a later, licensed track. If managed custody is truly
-   the product, that is a legal workstream that gates everything downstream.
+   credentials."* This **supersedes** the non-custodial design in
+   `EXCHANGE_ONBOARDING.md` — that doc (and the per-user-key
+   `account-link-service`) is now **out of scope for the launch model**. The
+   managed model means:
+   - **The platform trades on its own exchange accounts** (the existing `arb-*`
+     platform keys in Secret Manager), not per-user keys. `get_exchange_credentials`
+     is used with the **platform tenant**, not per-user tenants.
+   - **Per-user money is an internal ledger problem**: tenant balances, positions,
+     and a pooled-vs-segregated treasury — tracked in Postgres (`trading_accounts`,
+     `balances`, `transfers`, `withdrawals` per the brief), reconciled against the
+     platform's real exchange balances.
+   - **Onboarding gains a real funding step** (`funding_pending`) and **payouts**.
+   - **This is a regulated undertaking** — holding user funds and trading them is
+     money-transmitter / VASP (and possibly broker-dealer / collective-investment,
+     per jurisdiction) territory. The legal/licensing workstream **gates live
+     money**; engineering can proceed on paper-mode + the internal ledger in
+     parallel. See the trade-off note the team was given.
 2. **Auth provider — Clerk (resolved).** Was Firebase in the first sketches; the
    brief settles on Clerk. Cheap and isolated: it's one adapter in
    `services/core-api/auth.py` (`AUTH_PROVIDER=clerk`) plus a `clerk-webhook-sync`

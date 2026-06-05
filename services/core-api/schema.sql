@@ -7,10 +7,22 @@ CREATE TABLE IF NOT EXISTS tenants (
     display_name       VARCHAR(200) NOT NULL DEFAULT '',
     market             VARCHAR(16),                       -- 'africa' | 'global' (set at onboarding)
     region             VARCHAR(8),                        -- ISO country code (set at onboarding)
-    onboarding_status  VARCHAR(24)  NOT NULL DEFAULT 'started',  -- started|pending_review|trading_ready
+    onboarding_status  VARCHAR(24)  NOT NULL DEFAULT 'account_created',  -- see OnboardingStatus
+    kyc_status         VARCHAR(16)  NOT NULL DEFAULT 'none',             -- none|pending|verified|rejected
     live_enabled       BOOLEAN      NOT NULL DEFAULT FALSE,      -- paper until explicitly promoted
     created_at         TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS onboarding_events (
+    id           BIGSERIAL    PRIMARY KEY,
+    tenant_id    VARCHAR(64)  NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    action       VARCHAR(64)  NOT NULL,                  -- e.g. 'region.selected', 'policy.evaluated'
+    from_status  VARCHAR(24),
+    to_status    VARCHAR(24),
+    detail       VARCHAR(500) NOT NULL DEFAULT '',
+    created_at   TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_onboarding_events_tenant ON onboarding_events(tenant_id);
 
 CREATE TABLE IF NOT EXISTS users (
     id          VARCHAR(128) PRIMARY KEY,                 -- Firebase uid
