@@ -91,6 +91,7 @@ jobs:
           - ai-ops-agent
           - execution-orchestrator
           - sentiment-service
+          - notification-dispatcher
           - fx-rate-service
     steps:
       - uses: actions/checkout@v4
@@ -127,6 +128,7 @@ jobs:
           - ai-ops-agent
           - execution-orchestrator
           - sentiment-service
+          - notification-dispatcher
           - fx-rate-service
     services:
       redis:
@@ -225,6 +227,7 @@ jobs:
           - ai-ops-agent
           - execution-orchestrator
           - sentiment-service
+          - notification-dispatcher
           - fx-rate-service
     steps:
       - uses: actions/checkout@v4

@@ -169,6 +169,15 @@ locals {
       subscribe_subs = []
       cpu_idle       = true
     }
+    # Notification dispatcher — country-routed WhatsApp/Telegram/SMS alerts with
+    # channel fallback. Provider creds (Telegram/Twilio) added to `secrets` when
+    # populated; degrades gracefully (no provider → reports undelivered).
+    "notification-dispatcher" = {
+      secrets        = []
+      publish_topics = []
+      subscribe_subs = []
+      cpu_idle       = true
+    }
     # FX rate service — local-currency P&L (ZAR/NGN/KES) + Nigeria multi-rate.
     # Keyless by default (free fallback provider); add OPEN_EXCHANGE_RATES_APP_ID
     # to `secrets` once populated for the higher-quality primary. Redis-cached;
