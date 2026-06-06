@@ -211,7 +211,10 @@ def _start_subscriber() -> None:
     from google.cloud import pubsub_v1
 
     project_id = os.environ["GCP_PROJECT_ID"]
-    subscription_name = os.environ.get("OPPORTUNITIES_SUBSCRIPTION", "arb-opportunities-paper-trader")
+    # Consume APPROVED opportunities (arb-approved) — risk-engine only forwards
+    # risk-approved opps here with execute=True. Never subscribe to the raw
+    # arb-opportunities feed, or unapproved trades would execute.
+    subscription_name = os.environ.get("OPPORTUNITIES_SUBSCRIPTION", "arb-approved-paper-trader")
 
     subscriber = pubsub_v1.SubscriberClient()
     subscription_path = subscriber.subscription_path(project_id, subscription_name)

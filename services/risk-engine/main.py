@@ -45,7 +45,9 @@ from models import (
     KillSwitchResetRequest,
     KillSwitchTriggerRequest,
 )
+from shared.models.opportunity import Opportunity
 from shared.models.trade import Trade
+from shared.pubsub.publisher import Topic, get_publisher
 from rules.capital_validator import validate_capital
 from rules.drawdown_guard import DEFAULT_LIMITS, check_drawdown
 from rules.exchange_health import check_exchange_health
@@ -90,6 +92,50 @@ def _on_trade_fill(message) -> None:
         message.nack()
 
 
+_publisher = None
+
+
+def _get_publisher():
+    global _publisher
+    if _publisher is None:
+        _publisher = get_publisher()
+    return _publisher
+
+
+def evaluate_and_forward(opp: Opportunity) -> Opportunity | None:
+    """Run the full risk evaluation for an opportunity; if approved, return a copy
+    marked ``execute=True`` ready to publish to APPROVED_OPPORTUNITIES. This is the
+    approve→execute bridge — the ONLY path that turns a detected opportunity into
+    an executable one."""
+    result = evaluate(EvaluateRequest(opportunity=opp, tenant_id=opp.user_id))
+    if not result.approved:
+        return None
+    return opp.model_copy(update={"execute": True})
+
+
+def _on_opportunity(message) -> None:
+    """Consume a detected opportunity, gate it, and forward approved ones."""
+    try:
+        opp = Opportunity.model_validate_json(message.data)
+    except Exception:
+        logger.exception("failed to parse opportunity")
+        message.ack()  # malformed — don't redeliver forever
+        return
+    try:
+        approved = evaluate_and_forward(opp)
+        if approved is not None:
+            _get_publisher().publish(
+                Topic.APPROVED_OPPORTUNITIES, approved, attributes={"tenant": opp.user_id}
+            )
+            logger.info("opportunity id=%s tenant=%s APPROVED -> arb-approved", opp.id, opp.user_id)
+        else:
+            logger.info("opportunity id=%s tenant=%s rejected — not forwarded", opp.id, opp.user_id)
+        message.ack()
+    except Exception:
+        logger.exception("failed to evaluate/forward opportunity id=%s", getattr(opp, "id", "?"))
+        message.nack()
+
+
 def _start_subscribers() -> None:
     """Subscribe to arb-trade-fills so risk state tracks realized PnL/exposure.
 
@@ -108,6 +154,13 @@ def _start_subscribers() -> None:
     path = _subscriber_client.subscription_path(project_id, sub)
     _subscriber_futures.append(_subscriber_client.subscribe(path, callback=_on_trade_fill))
     logger.info("subscribed: %s", path)
+
+    # Approve→execute bridge: consume detected opportunities, gate them, and
+    # re-emit approved ones to APPROVED_OPPORTUNITIES for the executors.
+    opp_sub = os.environ.get("OPPORTUNITIES_SUBSCRIPTION", "arb-opportunities-risk-engine")
+    opp_path = _subscriber_client.subscription_path(project_id, opp_sub)
+    _subscriber_futures.append(_subscriber_client.subscribe(opp_path, callback=_on_opportunity))
+    logger.info("subscribed: %s", opp_path)
 
 
 def _stop_subscribers() -> None:

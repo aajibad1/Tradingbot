@@ -28,6 +28,13 @@ class Topic(str, Enum):
     MARKET_DATA = "arb-market-data"
     FUNDING_RATES = "arb-funding-rates"
     OPPORTUNITIES = "arb-opportunities"
+    # Risk-engine republishes opportunities it APPROVES here, with execute=True.
+    # This is the approve→execute bridge: opportunity-engine emits to
+    # OPPORTUNITIES (execute=False); risk-engine gates and re-emits approved ones
+    # to APPROVED_OPPORTUNITIES; paper-trader / execution-orchestrator consume
+    # this topic (never OPPORTUNITIES directly), so only risk-approved trades
+    # ever execute. A separate topic avoids risk-engine re-consuming its own output.
+    APPROVED_OPPORTUNITIES = "arb-approved"
     RISK_ALERTS = "arb-risk-alerts"
     TRADE_FILLS = "arb-trade-fills"
     AI_PROPOSALS = "arb-ai-proposals"

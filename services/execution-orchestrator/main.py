@@ -76,7 +76,9 @@ def _start_subscribers() -> None:
     from google.cloud import pubsub_v1
 
     _subscriber_client = pubsub_v1.SubscriberClient()
-    sub = os.environ.get("OPPORTUNITY_SUBSCRIPTION", "arb-opportunities-orchestrator")
+    # Consume APPROVED opportunities (arb-approved) from the risk-engine bridge —
+    # these are risk-approved with execute=True. Never the raw arb-opportunities.
+    sub = os.environ.get("OPPORTUNITY_SUBSCRIPTION", "arb-approved-orchestrator")
     path = _subscriber_client.subscription_path(project_id, sub)
     future = _subscriber_client.subscribe(path, callback=_on_opportunity)
     _futures.append(future)

@@ -42,6 +42,10 @@ locals {
     "arb-market-data",
     "arb-funding-rates",
     "arb-opportunities",
+    # Approve→execute bridge: risk-engine re-emits APPROVED opportunities here
+    # (execute=True); paper-trader / execution-orchestrator consume this, not
+    # arb-opportunities. See shared/pubsub/publisher.py:Topic.APPROVED_OPPORTUNITIES.
+    "arb-approved",
     "arb-risk-alerts",
     "arb-trade-fills",
     "arb-ai-proposals",
@@ -54,19 +58,20 @@ locals {
 
   # Subscription convention: <topic>-<consumer-service>
   subscriptions = {
-    "arb-market-data-opp-engine"     = "arb-market-data"
-    "arb-funding-rates-opp-engine"   = "arb-funding-rates"
-    "arb-opportunities-risk-engine"  = "arb-opportunities"
-    "arb-opportunities-ledger"       = "arb-opportunities"
-    "arb-opportunities-paper-trader" = "arb-opportunities"
-    "arb-opportunities-orchestrator" = "arb-opportunities"
-    "arb-risk-alerts-ledger"         = "arb-risk-alerts"
-    "arb-risk-alerts-ai-ops"         = "arb-risk-alerts"
-    "arb-market-data-ledger"         = "arb-market-data"
-    "arb-trade-fills-ledger"         = "arb-trade-fills"
-    "arb-trade-fills-risk-engine"    = "arb-trade-fills"
-    "arb-ai-proposals-ledger"        = "arb-ai-proposals"
-    "arb-audit-log-ledger"           = "arb-audit-log"
+    "arb-market-data-opp-engine"    = "arb-market-data"
+    "arb-funding-rates-opp-engine"  = "arb-funding-rates"
+    "arb-opportunities-risk-engine" = "arb-opportunities"
+    "arb-opportunities-ledger"      = "arb-opportunities"
+    # Executors consume APPROVED opportunities (post risk-engine bridge), not the raw feed.
+    "arb-approved-paper-trader"   = "arb-approved"
+    "arb-approved-orchestrator"   = "arb-approved"
+    "arb-risk-alerts-ledger"      = "arb-risk-alerts"
+    "arb-risk-alerts-ai-ops"      = "arb-risk-alerts"
+    "arb-market-data-ledger"      = "arb-market-data"
+    "arb-trade-fills-ledger"      = "arb-trade-fills"
+    "arb-trade-fills-risk-engine" = "arb-trade-fills"
+    "arb-ai-proposals-ledger"     = "arb-ai-proposals"
+    "arb-audit-log-ledger"        = "arb-audit-log"
   }
 
   # BigQuery datasets — table-expiration rules:
@@ -114,19 +119,19 @@ locals {
       cpu_idle       = false
     }
     "risk-engine" = {
-      secrets        = ["KILL_SWITCH_RESET_TOKEN"]
-      publish_topics = ["arb-risk-alerts", "arb-audit-log"]
-      # Subscribes to trade fills to maintain risk:* state (daily PnL, exposure,
-      # concentration) so the drawdown/position-limit backstops have live data.
+      secrets = ["KILL_SWITCH_RESET_TOKEN"]
+      # Publishes APPROVED opportunities to arb-approved (the approve→execute bridge).
+      publish_topics = ["arb-approved", "arb-risk-alerts", "arb-audit-log"]
+      # Subscribes to the raw opportunity feed (to gate + forward) and to trade
+      # fills (to maintain risk:* state: daily PnL, exposure, concentration).
       subscribe_subs = ["arb-opportunities-risk-engine", "arb-trade-fills-risk-engine"]
       cpu_idle       = false
     }
     "paper-trader" = {
       secrets        = []
       publish_topics = ["arb-trade-fills", "arb-audit-log"]
-      # Consumes APPROVED opportunities to simulate (was wired to its own output
-      # topic arb-trade-fills — backwards; paper-trader's code subscribes here).
-      subscribe_subs = ["arb-opportunities-paper-trader"]
+      # Consumes APPROVED opportunities (post risk-engine bridge) to simulate.
+      subscribe_subs = ["arb-approved-paper-trader"]
       cpu_idle       = true
     }
     "trade-ledger" = {
@@ -154,9 +159,9 @@ locals {
     "execution-orchestrator" = {
       secrets        = ["COINBASE_API_KEY", "KRAKEN_API_KEY", "KRAKEN_SECRET", "CRYPTOCOM_API_KEY", "BINANCE_US_KEY", "HYPERLIQUID_KEY"]
       publish_topics = ["arb-trade-fills", "arb-audit-log"]
-      # Consumes approved opportunities to route through human approval → Hummingbot
-      # (its code subscribes to arb-opportunities-orchestrator; was missing here).
-      subscribe_subs = ["arb-opportunities-orchestrator"]
+      # Consumes APPROVED opportunities (post risk-engine bridge) to route through
+      # human approval → Hummingbot.
+      subscribe_subs = ["arb-approved-orchestrator"]
       cpu_idle       = false
     }
     # Sentiment-service — Cloud Scheduler hits POST /sentiment/refresh every
