@@ -25,10 +25,16 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException, Request
 from sqlalchemy.orm import Session
 
+from decimal import Decimal
+
+from pydantic import BaseModel
+
+import accounts_client
 import billing
 import clerk
 import eligibility
 import onboarding
+from accounts_client import AccountsClient
 from auth import Identity, current_identity
 from db import (
     AuditLog,
@@ -406,6 +412,64 @@ def live_enable(
     eligibility.publish_snapshot(tenant)
     logger.info("tenant=%s live-enabled (plan=%s)", tenant.id, tenant.plan.value)
     return _to_profile(user)
+
+
+# --- funding (managed custody, paper mode) ------------------------------------
+
+class FundingRequest(BaseModel):
+    asset: str
+    amount: Decimal
+
+
+def get_accounts_client() -> AccountsClient:
+    """FastAPI dependency — the accounts-service client. Tests override this."""
+    url = os.environ.get("ACCOUNTS_SERVICE_URL")
+    if not url:
+        raise HTTPException(status_code=503, detail="funding not configured (ACCOUNTS_SERVICE_URL unset)")
+    return AccountsClient(url)
+
+
+@app.get("/v1/funding/balances")
+def funding_balances(
+    asset: str,
+    identity: Identity = Depends(current_identity),
+    db: Session = Depends(get_session),
+    ac: AccountsClient = Depends(get_accounts_client),
+) -> dict:
+    tenant = _require_tenant(db, identity)
+    return ac.balances(tenant.id, asset)
+
+
+@app.post("/v1/funding/deposit")
+def funding_deposit(
+    body: FundingRequest,
+    identity: Identity = Depends(current_identity),
+    db: Session = Depends(get_session),
+    ac: AccountsClient = Depends(get_accounts_client),
+) -> dict:
+    """Fund the tenant's account (paper mode — recorded in the internal ledger)."""
+    tenant = _require_tenant(db, identity)
+    result = ac.deposit(tenant.id, body.asset, body.amount)
+    _audit(db, tenant.id, identity.uid, "funding.deposit", f"{body.amount} {body.asset}")
+    db.commit()
+    return result
+
+
+@app.post("/v1/funding/withdraw")
+def funding_withdraw(
+    body: FundingRequest,
+    user: User = Depends(require_permission(Permission.REQUEST_WITHDRAWAL)),
+    db: Session = Depends(get_session),
+    ac: AccountsClient = Depends(get_accounts_client),
+) -> dict:
+    """Withdraw from the tenant's balance. Owner-only (REQUEST_WITHDRAWAL)."""
+    try:
+        result = ac.withdraw(user.tenant_id, body.asset, body.amount)
+    except accounts_client.AccountsInsufficientFunds as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    _audit(db, user.tenant_id, user.id, "funding.withdraw", f"{body.amount} {body.asset}")
+    db.commit()
+    return result
 
 
 @app.get("/v1/audit", response_model=list[AuditEntry])

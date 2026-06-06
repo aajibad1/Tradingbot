@@ -353,6 +353,85 @@ def test_clerk_user_deleted_removes_user(client):
     assert client.get("/v1/me", headers=_auth("user_del")).status_code == 404
 
 
+# --- funding flow (core-api -> accounts-service, mocked) ----------------------
+
+class _FakeAccounts:
+    """In-memory stand-in for accounts-service used via dependency override."""
+    def __init__(self):
+        self.avail: dict[tuple[str, str], float] = {}
+
+    def deposit(self, tenant, asset, amount):
+        self.avail[(tenant, asset)] = self.avail.get((tenant, asset), 0.0) + float(amount)
+        return self._bal(tenant, asset)
+
+    def withdraw(self, tenant, asset, amount):
+        import accounts_client
+        if self.avail.get((tenant, asset), 0.0) < float(amount):
+            raise accounts_client.AccountsInsufficientFunds("available < amount")
+        self.avail[(tenant, asset)] -= float(amount)
+        return self._bal(tenant, asset)
+
+    def balances(self, tenant, asset):
+        return self._bal(tenant, asset)
+
+    def _bal(self, tenant, asset):
+        return {"tenant_id": tenant, "asset": asset,
+                "available": self.avail.get((tenant, asset), 0.0), "reserved": 0.0}
+
+
+@pytest.fixture()
+def accounts(client):
+    import main
+    fake = _FakeAccounts()
+    main.app.dependency_overrides[main.get_accounts_client] = lambda: fake
+    yield fake
+    main.app.dependency_overrides.pop(main.get_accounts_client, None)
+
+
+def test_deposit_then_balance(client, accounts):
+    h = _auth("fnd-1", "p@x.com")
+    client.post("/v1/sessions", headers=h)
+    r = client.post("/v1/funding/deposit", headers=h, json={"asset": "USD", "amount": "1000"})
+    assert r.status_code == 200, r.text
+    assert r.json()["available"] == 1000.0
+    bal = client.get("/v1/funding/balances", headers=h, params={"asset": "USD"}).json()
+    assert bal["available"] == 1000.0
+
+
+def test_withdraw_requires_permission_and_succeeds_for_owner(client, accounts):
+    h = _auth("fnd-2", "q@x.com")
+    client.post("/v1/sessions", headers=h)
+    client.post("/v1/funding/deposit", headers=h, json={"asset": "USD", "amount": "500"})
+    r = client.post("/v1/funding/withdraw", headers=h, json={"asset": "USD", "amount": "200"})
+    assert r.status_code == 200, r.text
+    assert r.json()["available"] == 300.0
+
+
+def test_withdraw_insufficient_funds_is_409(client, accounts):
+    h = _auth("fnd-3", "r@x.com")
+    client.post("/v1/sessions", headers=h)
+    client.post("/v1/funding/deposit", headers=h, json={"asset": "USD", "amount": "100"})
+    r = client.post("/v1/funding/withdraw", headers=h, json={"asset": "USD", "amount": "150"})
+    assert r.status_code == 409
+
+
+def test_funding_audited(client, accounts):
+    h = _auth("fnd-4", "s@x.com")
+    client.post("/v1/sessions", headers=h)
+    client.post("/v1/funding/deposit", headers=h, json={"asset": "USD", "amount": "1000"})
+    actions = [e["action"] for e in client.get("/v1/audit", headers=h).json()]
+    assert "funding.deposit" in actions
+
+
+def test_funding_503_when_unconfigured(client, monkeypatch):
+    # no dependency override + ACCOUNTS_SERVICE_URL unset → 503
+    monkeypatch.delenv("ACCOUNTS_SERVICE_URL", raising=False)
+    h = _auth("fnd-5", "t@x.com")
+    client.post("/v1/sessions", headers=h)
+    r = client.get("/v1/funding/balances", headers=h, params={"asset": "USD"})
+    assert r.status_code == 503
+
+
 def test_eligibility_snapshot_reflects_onboarding_and_plan():
     import eligibility
     from db import Market, OnboardingStatus, PlanTier, Tenant
