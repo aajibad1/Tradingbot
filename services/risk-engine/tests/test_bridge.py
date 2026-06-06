@@ -99,3 +99,31 @@ def test_evaluate_and_forward_marks_execute_when_approved(fake_redis):
     import main
     out = main.evaluate_and_forward(_opp())
     assert out is not None and out.execute is True
+
+
+def test_advisory_rank_annotates_published_message(fake_redis, monkeypatch):
+    _seed_health(fake_redis)
+    import main
+    pub = _CapturePublisher()
+    monkeypatch.setattr(main, "_get_publisher", lambda: pub)
+    monkeypatch.setattr(main, "_advisory_rank",
+                        lambda opp: {"recommended_action": "continue_to_risk",
+                                     "profitability_probability": 0.82})
+    main._on_opportunity(_FakeMessage(_opp()))
+    _, _, attrs = pub.published[0]
+    assert attrs["rank_action"] == "continue_to_risk"
+    assert attrs["rank_prob"] == "0.82"
+
+
+def test_advisory_rank_failure_is_fail_open(fake_redis, monkeypatch):
+    _seed_health(fake_redis)
+    import main
+    pub = _CapturePublisher()
+    monkeypatch.setattr(main, "_get_publisher", lambda: pub)
+    # ranker "down" → _advisory_rank returns None; approval still publishes.
+    monkeypatch.setattr(main, "_advisory_rank", lambda opp: None)
+    msg = _FakeMessage(_opp())
+    main._on_opportunity(msg)
+    assert msg.acked
+    assert len(pub.published) == 1
+    assert "rank_action" not in pub.published[0][2]

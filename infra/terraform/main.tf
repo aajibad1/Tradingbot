@@ -246,6 +246,14 @@ locals {
       subscribe_subs = []
       cpu_idle       = true
     }
+    # opportunity-ranker: advisory AI scoring (never approves). Internal-only,
+    # stateless — risk-engine calls it in-line and fails open if it's down.
+    "opportunity-ranker" = {
+      secrets        = []
+      publish_topics = []
+      subscribe_subs = []
+      cpu_idle       = true
+    }
   }
 
   # Flat list of every distinct secret ID used anywhere in the system.

@@ -113,6 +113,28 @@ def evaluate_and_forward(opp: Opportunity) -> Opportunity | None:
     return opp.model_copy(update={"execute": True})
 
 
+def _advisory_rank(opp: Opportunity) -> dict | None:
+    """Call the advisory opportunity-ranker. ADVISORY only and FAIL-OPEN: any
+    failure (or no ranker configured) returns None and never blocks the approval —
+    the deterministic gate has already decided."""
+    url = os.environ.get("OPPORTUNITY_RANKER_URL")
+    if not url:
+        return None
+    try:
+        import httpx
+
+        r = httpx.post(
+            f"{url.rstrip('/')}/score",
+            json={"net_edge_bps": opp.net_edge_bps, "size_usd": opp.recommended_size_usd},
+            timeout=1.0,
+        )
+        r.raise_for_status()
+        return r.json()
+    except Exception:
+        logger.warning("advisory rank unavailable for opp=%s (fail-open)", opp.id)
+        return None
+
+
 def _on_opportunity(message) -> None:
     """Consume a detected opportunity, gate it, and forward approved ones."""
     try:
@@ -124,10 +146,15 @@ def _on_opportunity(message) -> None:
     try:
         approved = evaluate_and_forward(opp)
         if approved is not None:
-            _get_publisher().publish(
-                Topic.APPROVED_OPPORTUNITIES, approved, attributes={"tenant": opp.user_id}
-            )
-            logger.info("opportunity id=%s tenant=%s APPROVED -> arb-approved", opp.id, opp.user_id)
+            attrs = {"tenant": opp.user_id}
+            ranking = _advisory_rank(approved)  # advisory annotation, never gates
+            if ranking:
+                attrs["rank_action"] = str(ranking.get("recommended_action", ""))
+                attrs["rank_prob"] = str(ranking.get("profitability_probability", ""))
+            _get_publisher().publish(Topic.APPROVED_OPPORTUNITIES, approved, attributes=attrs)
+            logger.info("opportunity id=%s tenant=%s APPROVED -> arb-approved%s",
+                        opp.id, opp.user_id,
+                        f" (rank={attrs.get('rank_action')})" if ranking else "")
         else:
             logger.info("opportunity id=%s tenant=%s rejected — not forwarded", opp.id, opp.user_id)
         message.ack()
