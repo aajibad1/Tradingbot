@@ -78,6 +78,8 @@ locals {
     "arb-trade-fills-risk-engine" = "arb-trade-fills"
     "arb-ai-proposals-ledger"     = "arb-ai-proposals"
     "arb-audit-log-ledger"        = "arb-audit-log"
+    # Africa corridor alerts → notification-dispatcher (ops alert).
+    "arb-corridor-alerts-dispatcher" = "arb-corridor-alerts"
   }
 
   # BigQuery datasets — table-expiration rules:
@@ -186,7 +188,7 @@ locals {
     "notification-dispatcher" = {
       secrets        = []
       publish_topics = []
-      subscribe_subs = []
+      subscribe_subs = ["arb-corridor-alerts-dispatcher"]
       cpu_idle       = true
     }
     # FX rate service — local-currency P&L (ZAR/NGN/KES) + Nigeria multi-rate.
