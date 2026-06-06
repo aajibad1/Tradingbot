@@ -11,7 +11,11 @@ Keys (single source of truth across services):
   risk:leverage_multiplier       float
   risk:last_updated              ISO-8601 string
 
-Read-mostly. The risk-engine is the sole writer; everyone else is read-only.
+Cross-plane (read-only here; WRITTEN by core-api, not risk-engine):
+  eligibility:t:<tenant>         JSON trading-eligibility snapshot (control plane)
+
+Read-mostly. The risk-engine is the sole writer of risk:*; everyone else is
+read-only. The eligibility:* keys are owned by core-api and consumed here.
 """
 
 from __future__ import annotations

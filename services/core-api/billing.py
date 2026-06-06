@@ -77,14 +77,15 @@ def _tenant_for(db: Session, obj: dict) -> Tenant | None:
     return None
 
 
-def apply_event(db: Session, event: dict) -> str:
-    """Apply a (already signature-verified, deduped) Stripe event. Returns a short
-    summary. Unknown/unhandled types are ignored (logged by the caller)."""
+def apply_event(db: Session, event: dict) -> tuple[Tenant | None, str]:
+    """Apply a (already signature-verified, deduped) Stripe event. Returns the
+    affected tenant (or None) plus a short summary. Unknown/unhandled types are
+    ignored. The caller publishes a fresh eligibility snapshot for the tenant."""
     etype = event.get("type", "")
     obj = (event.get("data") or {}).get("object") or {}
     tenant = _tenant_for(db, obj)
     if tenant is None:
-        return f"{etype}: no matching tenant — ignored"
+        return None, f"{etype}: no matching tenant — ignored"
 
     if obj.get("customer"):
         tenant.stripe_customer_id = obj["customer"]
@@ -92,7 +93,7 @@ def apply_event(db: Session, event: dict) -> str:
     if etype in _CANCELING:
         tenant.plan = PlanTier.FREE
         tenant.subscription_status = SubscriptionStatus.CANCELED
-        return f"{etype}: tenant={tenant.id} -> free/canceled"
+        return tenant, f"{etype}: tenant={tenant.id} -> free/canceled"
 
     if etype in _ACTIVATING:
         meta = obj.get("metadata") or {}
@@ -102,6 +103,6 @@ def apply_event(db: Session, event: dict) -> str:
         except ValueError:
             pass  # unknown plan string — leave plan unchanged
         tenant.subscription_status = SubscriptionStatus.ACTIVE
-        return f"{etype}: tenant={tenant.id} -> {tenant.plan.value}/active"
+        return tenant, f"{etype}: tenant={tenant.id} -> {tenant.plan.value}/active"
 
-    return f"{etype}: unhandled"
+    return tenant, f"{etype}: unhandled"

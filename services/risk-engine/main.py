@@ -55,6 +55,7 @@ from rules.kill_switch import (
     trigger_kill_switch as kill_switch_trigger,
 )
 from rules.liquidation_monitor import check_liquidations, scan as scan_liquidations
+from rules.eligibility_gate import check_eligibility
 from rules.position_limits import check_position_limits
 from rules.sentiment_gate import check_sentiment
 from state import (
@@ -204,6 +205,12 @@ def get_capital_validation() -> dict:
     }
 
 
+# When true, a non-default tenant with NO eligibility snapshot is rejected (full
+# onboarding enforcement). Default false keeps legacy multi-tenant flows working;
+# a snapshot that says not-ready always blocks regardless.
+_REQUIRE_ELIGIBILITY = os.environ.get("REQUIRE_TENANT_ELIGIBILITY", "false").lower() == "true"
+
+
 @app.post("/evaluate", response_model=EvaluateResponse)
 def evaluate(req: EvaluateRequest) -> EvaluateResponse:
     redis = get_redis()
@@ -216,6 +223,15 @@ def evaluate(req: EvaluateRequest) -> EvaluateResponse:
             req.opportunity.id, tenant,
         )
         return EvaluateResponse(approved=False, violations=[], kill_switch_active=True)
+
+    # Stage 1.5: tenant eligibility (control-plane seam). Short-circuit BEFORE
+    # load_state — an un-onboarded tenant has no risk state to load. Skipped for
+    # the default tenant; enforced for unknown tenants only when REQUIRE set.
+    eligibility_violations = check_eligibility(redis, tenant, require=_REQUIRE_ELIGIBILITY)
+    if eligibility_violations:
+        logger.info("opportunity rejected id=%s tenant=%s reason=not_eligible",
+                    req.opportunity.id, tenant)
+        return EvaluateResponse(approved=False, violations=eligibility_violations, kill_switch_active=False)
 
     state = load_state(redis, tenant)
 

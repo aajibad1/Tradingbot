@@ -26,6 +26,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from sqlalchemy.orm import Session
 
 import billing
+import eligibility
 import onboarding
 from auth import Identity, current_identity
 from db import (
@@ -237,6 +238,7 @@ def submit_onboarding(
     _transition(db, tenant, decision.final_status, "policy.evaluated", decision.reason)
     _audit(db, tenant.id, identity.uid, f"onboarding.{decision.final_status.value}", decision.reason)
     db.commit()
+    eligibility.publish_snapshot(tenant)  # control-plane → execution-plane seam
     logger.info("tenant=%s onboarding -> %s (%s)", tenant.id,
                 decision.final_status.value, decision.reason)
     return _view(tenant, decision.required_controls)
@@ -288,8 +290,10 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_session)) -
         return {"status": "duplicate", "id": event_id}
     db.add(WebhookEvent(id=event_id, source="stripe", event_type=event.get("type", "")))
 
-    summary = billing.apply_event(db, event)
+    tenant, summary = billing.apply_event(db, event)
     db.commit()
+    if tenant is not None:
+        eligibility.publish_snapshot(tenant)  # plan change → refresh eligibility
     logger.info("stripe webhook %s", summary)
     return {"status": "ok", "summary": summary}
 
@@ -346,6 +350,7 @@ def live_enable(
     tenant.live_enabled = True
     _audit(db, tenant.id, user.id, "live.enabled", f"plan={tenant.plan.value}")
     db.commit()
+    eligibility.publish_snapshot(tenant)
     logger.info("tenant=%s live-enabled (plan=%s)", tenant.id, tenant.plan.value)
     return _to_profile(user)
 

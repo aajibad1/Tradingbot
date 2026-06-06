@@ -13,6 +13,7 @@ class RiskRule(str, Enum):
     MIN_NET_EDGE = "min_net_edge"
     API_LATENCY = "api_latency"
     KILL_SWITCH = "kill_switch"
+    TENANT_NOT_ELIGIBLE = "tenant_not_eligible"
 
 
 class RiskViolation(BaseModel):

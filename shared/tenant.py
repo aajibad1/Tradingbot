@@ -49,6 +49,17 @@ def risk_scan_pattern(prefix: str, tenant_id: str = DEFAULT_TENANT) -> str:
     return risk_key(f"{prefix}*", tenant_id)
 
 
+def eligibility_key(tenant_id: str) -> str:
+    """Redis key for a tenant's trading-eligibility snapshot.
+
+    Written by core-api (control plane) when onboarding/plan/live state changes;
+    read by risk-engine (execution plane) as an entitlement gate. JSON value:
+    ``{trading_ready, live_enabled, live_allowed, markets, max_live_capital_usd, plan}``.
+    The ``default`` tenant has no snapshot — the gate skips it (legacy single-tenant).
+    """
+    return f"eligibility:t:{validate_tenant(tenant_id)}"
+
+
 def exchange_secret_id(exchange: str, kind: str, tenant_id: str = DEFAULT_TENANT) -> str:
     """Secret Manager id for an exchange credential.
 

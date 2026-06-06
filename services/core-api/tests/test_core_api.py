@@ -299,6 +299,26 @@ def test_audit_requires_permission(client):
     assert client.get("/v1/audit", headers=h).status_code == 403
 
 
+def test_eligibility_snapshot_reflects_onboarding_and_plan():
+    import eligibility
+    from db import Market, OnboardingStatus, PlanTier, Tenant
+
+    ready_pro = Tenant(id="t1", plan=PlanTier.PRO, market=Market.GLOBAL,
+                       onboarding_status=OnboardingStatus.TRADING_READY, live_enabled=True)
+    snap = eligibility.build_snapshot(ready_pro)
+    assert snap["trading_ready"] is True
+    assert snap["live_allowed"] is True            # pro plan
+    assert set(snap["markets"]) == {"global", "africa"}
+    assert snap["live_enabled"] is True
+
+    new_free = Tenant(id="t2", plan=PlanTier.FREE,
+                      onboarding_status=OnboardingStatus.ACCOUNT_CREATED, live_enabled=False)
+    snap2 = eligibility.build_snapshot(new_free)
+    assert snap2["trading_ready"] is False
+    assert snap2["live_allowed"] is False
+    assert snap2["markets"] == []
+
+
 def test_audit_isolated_per_tenant(client):
     ha = _ready_pro(client, "au-3")
     _ready_pro(client, "au-4")
