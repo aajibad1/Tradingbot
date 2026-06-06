@@ -46,6 +46,11 @@ jobs:
           - dashboard-api
           - notification-dispatcher
           - fx-rate-service
+          # Control plane (multi-tenant SaaS) — Postgres-backed; need Cloud SQL
+          # + DATABASE_URL wired in terraform before they can actually deploy.
+          - core-api
+          - accounts-service
+          - account-link-service
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
     steps:
