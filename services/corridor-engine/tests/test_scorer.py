@@ -60,3 +60,47 @@ def test_negative_dislocation_is_not_viable():
     s = score_corridor(_quote(official_fx_dest_per_source=0.012))
     assert s.gross_edge_bps < 0
     assert s.viable is False
+
+
+# --- alert publishing (alert-only path) ---------------------------------------
+
+class _CapturePublisher:
+    def __init__(self):
+        self.published = []
+
+    def publish(self, topic, payload, attributes=None):
+        self.published.append((topic, payload, attributes))
+        return "id"
+
+
+def _client(monkeypatch):
+    import main
+    from fastapi.testclient import TestClient
+    pub = _CapturePublisher()
+    monkeypatch.setattr(main, "_get_publisher", lambda: pub)
+    return TestClient(main.app), pub
+
+
+def _quote_json(**over):
+    base = dict(corridor="NGN->ZAR", base_asset="USDT", amount_source=1_000_000.0,
+                stablecoin_per_source=0.00061, dest_per_stablecoin=18.36,
+                official_fx_dest_per_source=0.010980, buy_fee_bps=10, sell_fee_bps=10,
+                conversion_cost_bps=20)
+    base.update(over)
+    return base
+
+
+def test_viable_corridor_publishes_alert(monkeypatch):
+    from shared.pubsub.publisher import Topic
+    client, pub = _client(monkeypatch)
+    r = client.post("/score", json=_quote_json())
+    assert r.status_code == 200 and r.json()["viable"] is True
+    assert len(pub.published) == 1
+    assert pub.published[0][0] == Topic.CORRIDOR_ALERTS
+
+
+def test_nonviable_corridor_does_not_publish(monkeypatch):
+    client, pub = _client(monkeypatch)
+    r = client.post("/score", json=_quote_json(official_fx_dest_per_source=0.012))
+    assert r.status_code == 200 and r.json()["viable"] is False
+    assert pub.published == []

@@ -45,6 +45,10 @@ class Topic(str, Enum):
     # for backtesting + dashboard charts. Risk-engine does NOT subscribe —
     # it reads Redis to keep the /evaluate hot path I/O-cheap and synchronous.
     SENTIMENT_EVENTS = "arb-sentiment-events"
+    # Africa corridor-engine emits VIABLE corridor opportunities here (alert-only).
+    # notification-dispatcher consumes them to alert a human to settle — never
+    # auto-executed (settlement is money-transmission/VASP-regulated).
+    CORRIDOR_ALERTS = "arb-corridor-alerts"
 
 
 class EventPublisher:

@@ -54,6 +54,8 @@ locals {
     # can never 404. The trade-ledger sentiment-history stream is still TODO,
     # hence no subscription below yet.
     "arb-sentiment-events",
+    # Africa corridor-engine → notification-dispatcher (alert-only).
+    "arb-corridor-alerts",
   ]
 
   # Subscription convention: <topic>-<consumer-service>
