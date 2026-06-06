@@ -51,6 +51,7 @@ jobs:
           - core-api
           - accounts-service
           - account-link-service
+          - corridor-engine
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
     steps:
