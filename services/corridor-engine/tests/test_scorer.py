@@ -104,3 +104,21 @@ def test_nonviable_corridor_does_not_publish(monkeypatch):
     r = client.post("/score", json=_quote_json(official_fx_dest_per_source=0.012))
     assert r.status_code == 200 and r.json()["viable"] is False
     assert pub.published == []
+
+
+def test_scan_ranks_viable_and_skips_nonviable(monkeypatch):
+    client, pub = _client(monkeypatch)
+    quotes = [
+        _quote_json(corridor="NGN->ZAR"),                                  # viable, ~big edge
+        _quote_json(corridor="KES->ZAR", dest_per_stablecoin=18.20),       # viable, smaller edge
+        _quote_json(corridor="GHS->NGN", official_fx_dest_per_source=0.012),  # not viable
+    ]
+    r = client.post("/scan", json={"quotes": quotes}).json()
+    assert r["scanned"] == 3
+    corridors = [v["corridor"] for v in r["viable"]]
+    assert "GHS->NGN" not in corridors
+    # ranked by net edge descending
+    edges = [v["net_edge_bps"] for v in r["viable"]]
+    assert edges == sorted(edges, reverse=True)
+    # only the viable ones were alerted
+    assert len(pub.published) == len(r["viable"])

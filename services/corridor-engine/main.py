@@ -68,8 +68,7 @@ def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/score", response_model=ScoreOut)
-def score(q: QuoteIn) -> ScoreOut:
+def _score_one(q: QuoteIn) -> ScoreOut:
     result = score_corridor(CorridorQuote(**q.model_dump()))
     out = ScoreOut(**result.__dict__)
     if result.viable:
@@ -79,3 +78,26 @@ def score(q: QuoteIn) -> ScoreOut:
         logger.info("VIABLE corridor=%s net_edge=%.0fbps confidence=%.2f",
                     result.corridor, result.net_edge_bps, result.settlement_confidence)
     return out
+
+
+@app.post("/score", response_model=ScoreOut)
+def score(q: QuoteIn) -> ScoreOut:
+    return _score_one(q)
+
+
+class ScanIn(BaseModel):
+    quotes: list[QuoteIn]
+
+
+class ScanOut(BaseModel):
+    scanned: int
+    viable: list[ScoreOut]  # best net edge first
+
+
+@app.post("/scan", response_model=ScanOut)
+def scan(body: ScanIn) -> ScanOut:
+    """Score many corridors at once; return the viable ones ranked by net edge.
+    The realistic path — a sweep over live corridor quotes."""
+    scored = [_score_one(q) for q in body.quotes]
+    viable = sorted((s for s in scored if s.viable), key=lambda s: s.net_edge_bps, reverse=True)
+    return ScanOut(scanned=len(scored), viable=viable)
