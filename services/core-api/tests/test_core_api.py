@@ -16,6 +16,8 @@ from fastapi.testclient import TestClient
 from shared.tenant import validate_tenant
 
 _WHSEC = "whsec_test"
+# Svix secret must be whsec_<base64>; this decodes cleanly.
+_CLERK_SECRET = "whsec_" + __import__("base64").b64encode(b"clerk-test-key").decode()
 
 
 @pytest.fixture()
@@ -23,6 +25,7 @@ def client(monkeypatch):
     # Isolated SQLite file per test; local auth mode (no FIREBASE_PROJECT_ID).
     monkeypatch.delenv("FIREBASE_PROJECT_ID", raising=False)
     monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
+    monkeypatch.setenv("CLERK_WEBHOOK_SECRET", _CLERK_SECRET)
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{path}")
@@ -297,6 +300,57 @@ def test_audit_requires_permission(client):
     session.commit()
     session.close()
     assert client.get("/v1/audit", headers=h).status_code == 403
+
+
+# --- Clerk webhook sync -------------------------------------------------------
+
+def _clerk_headers(payload: bytes, svix_id="msg_1", ts="1700000000", secret=_CLERK_SECRET):
+    import base64
+    key = base64.b64decode(secret.split("_", 1)[1])
+    signed = f"{svix_id}.{ts}.".encode() + payload
+    sig = base64.b64encode(hmac.new(key, signed, hashlib.sha256).digest()).decode()
+    return {"svix-id": svix_id, "svix-timestamp": ts, "svix-signature": f"v1,{sig}"}
+
+
+def _clerk_event(etype, uid, email=None):
+    data = {"id": uid}
+    if email:
+        data["email_addresses"] = [{"id": "e1", "email_address": email}]
+        data["primary_email_address_id"] = "e1"
+    return {"type": etype, "data": data}
+
+
+def _post_clerk(client, ev, svix_id="msg_1", secret=_CLERK_SECRET):
+    payload = json.dumps(ev).encode()
+    return client.post("/webhooks/clerk", content=payload,
+                       headers=_clerk_headers(payload, svix_id=svix_id, secret=secret))
+
+
+def test_clerk_user_created_mirrors_into_db(client):
+    r = _post_clerk(client, _clerk_event("user.created", "user_abc", "z@x.com"))
+    assert r.status_code == 200, r.text
+    # the mirrored user can now authenticate and find an existing tenant
+    me = client.get("/v1/me", headers=_auth("user_abc"))
+    assert me.status_code == 200
+    assert me.json()["email"] == "z@x.com"
+
+
+def test_clerk_bad_signature_rejected(client):
+    r = _post_clerk(client, _clerk_event("user.created", "user_bad", "z@x.com"),
+                    secret="whsec_" + __import__("base64").b64encode(b"wrong").decode())
+    assert r.status_code == 400
+
+
+def test_clerk_webhook_idempotent(client):
+    ev = _clerk_event("user.created", "user_dup", "z@x.com")
+    assert _post_clerk(client, ev, svix_id="msg_dup").json()["status"] == "ok"
+    assert _post_clerk(client, ev, svix_id="msg_dup").json()["status"] == "duplicate"
+
+
+def test_clerk_user_deleted_removes_user(client):
+    _post_clerk(client, _clerk_event("user.created", "user_del", "z@x.com"), svix_id="m1")
+    _post_clerk(client, _clerk_event("user.deleted", "user_del"), svix_id="m2")
+    assert client.get("/v1/me", headers=_auth("user_del")).status_code == 404
 
 
 def test_eligibility_snapshot_reflects_onboarding_and_plan():

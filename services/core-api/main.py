@@ -26,6 +26,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from sqlalchemy.orm import Session
 
 import billing
+import clerk
 import eligibility
 import onboarding
 from auth import Identity, current_identity
@@ -106,6 +107,23 @@ def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _get_or_create_user(db: Session, uid: str, email: str | None) -> tuple[User, bool]:
+    """Idempotently map an identity to a tenant. Returns (user, created). A new
+    user gets a fresh tenant + OWNER role; a returning user has its email refreshed.
+    Caller commits + audits."""
+    user = _load_user(db, uid)
+    if user is not None:
+        if email and user.email != email:
+            user.email = email
+        return user, False
+    tenant = Tenant(id=_new_tenant_id(), display_name=email or uid)
+    user = User(id=uid, email=email, tenant=tenant)
+    user.roles.append(UserRole(user_id=uid, role=Role.OWNER))
+    db.add(tenant)
+    db.add(user)
+    return user, True
+
+
 @app.post("/v1/sessions", response_model=Profile)
 def create_session(
     identity: Identity = Depends(current_identity),
@@ -114,22 +132,11 @@ def create_session(
     """Map an authenticated identity to a tenant. Idempotent: a returning user
     gets their existing tenant/roles; a new user gets a fresh tenant + OWNER role.
     """
-    user = _load_user(db, identity.uid)
-    if user is not None:
-        # Keep email fresh if the IdP now provides one.
-        if identity.email and user.email != identity.email:
-            user.email = identity.email
-            db.commit()
-        return _to_profile(user)
-
-    tenant = Tenant(id=_new_tenant_id(), display_name=identity.email or identity.uid)
-    user = User(id=identity.uid, email=identity.email, tenant=tenant)
-    user.roles.append(UserRole(user_id=identity.uid, role=Role.OWNER))
-    db.add(tenant)
-    db.add(user)
-    _audit(db, tenant.id, identity.uid, "account.created", identity.email or "")
+    user, created = _get_or_create_user(db, identity.uid, identity.email)
+    if created:
+        _audit(db, user.tenant.id, identity.uid, "account.created", identity.email or "")
+        logger.info("created tenant=%s for user=%s", user.tenant.id, identity.uid)
     db.commit()
-    logger.info("created tenant=%s for user=%s", tenant.id, identity.uid)
     return _to_profile(user)
 
 
@@ -295,6 +302,52 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_session)) -
     if tenant is not None:
         eligibility.publish_snapshot(tenant)  # plan change → refresh eligibility
     logger.info("stripe webhook %s", summary)
+    return {"status": "ok", "summary": summary}
+
+
+@app.post("/webhooks/clerk")
+async def clerk_webhook(request: Request, db: Session = Depends(get_session)) -> dict[str, str]:
+    """Mirror Clerk user lifecycle into Postgres. Svix-signature-verified and
+    idempotent (deduped by the svix-id delivery id)."""
+    secret = os.environ.get("CLERK_WEBHOOK_SECRET")
+    if not secret:
+        raise HTTPException(status_code=503, detail="clerk sync not configured (CLERK_WEBHOOK_SECRET unset)")
+
+    payload = await request.body()
+    if not clerk.verify_signature(payload, request.headers, secret):
+        raise HTTPException(status_code=400, detail="invalid Clerk (Svix) signature")
+
+    import json
+    try:
+        event = json.loads(payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"bad JSON: {e}") from e
+
+    delivery_id = request.headers.get("svix-id")
+    if not delivery_id:
+        raise HTTPException(status_code=400, detail="missing svix-id")
+    if db.get(WebhookEvent, delivery_id) is not None:
+        return {"status": "duplicate", "id": delivery_id}
+    db.add(WebhookEvent(id=delivery_id, source="clerk", event_type=event.get("type", "")))
+
+    etype = event.get("type", "")
+    data = event.get("data") or {}
+    uid = data.get("id")
+    summary = f"{etype}: ignored"
+    if uid and etype in clerk.USER_UPSERT:
+        user, created = _get_or_create_user(db, uid, clerk.primary_email(data))
+        if created:
+            _audit(db, user.tenant.id, "clerk", "account.created", user.email or "")
+        summary = f"{etype}: tenant={user.tenant.id} ({'created' if created else 'updated'})"
+    elif uid and etype in clerk.USER_DELETE:
+        user = _load_user(db, uid)
+        if user is not None:
+            _audit(db, user.tenant_id, "clerk", "user.deleted", uid)
+            db.delete(user)
+            summary = f"{etype}: deleted user={uid}"
+
+    db.commit()
+    logger.info("clerk webhook %s", summary)
     return {"status": "ok", "summary": summary}
 
 
