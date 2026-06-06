@@ -87,6 +87,11 @@ def get_balances(tenant: str, asset: str, db: Session = Depends(get_session)) ->
     return _balances(db, tenant, asset)
 
 
+@app.get("/v1/accounts/{tenant}/balances/all")
+def get_all_balances(tenant: str, db: Session = Depends(get_session)) -> dict:
+    return {"tenant_id": tenant, "balances": ledger.list_balances(db, tenant)}
+
+
 @app.post("/v1/accounts/{tenant}/deposit", response_model=Balances)
 def deposit(tenant: str, body: Amount, db: Session = Depends(get_session)) -> Balances:
     _op(ledger.deposit, db, tenant, body.asset, body.amount, "api.deposit")

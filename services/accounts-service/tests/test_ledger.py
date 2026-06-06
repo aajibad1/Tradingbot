@@ -100,6 +100,18 @@ def test_positive_amount_enforced(db):
         ledger.deposit(db, "t1", "USD", -5)
 
 
+def test_list_balances_covers_all_assets(db):
+    import ledger
+    ledger.deposit(db, "t1", "USD", 1000)
+    ledger.deposit(db, "t1", "USDT", 500)
+    ledger.reserve(db, "t1", "USD", 300)
+    db.commit()
+    rows = {b["asset"]: b for b in ledger.list_balances(db, "t1")}
+    assert rows["USD"]["available"] == 700.0 and rows["USD"]["reserved"] == 300.0
+    assert rows["USDT"]["available"] == 500.0
+    assert ledger.list_balances(db, "other") == []
+
+
 def test_balances_are_isolated_per_tenant(db):
     import ledger
     ledger.deposit(db, "t1", "USD", 100)

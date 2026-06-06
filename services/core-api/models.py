@@ -60,6 +60,14 @@ class AuditEntry(BaseModel):
     created_at: datetime
 
 
+class DashboardView(BaseModel):
+    """Aggregated per-tenant view for the frontend dashboard."""
+
+    profile: "Profile"
+    entitlements: "EntitlementsView"
+    balances: list[dict]
+
+
 class OnboardingView(BaseModel):
     """Current onboarding position + what the user should do next."""
 

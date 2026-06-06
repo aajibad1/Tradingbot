@@ -52,6 +52,7 @@ from db import (
 )
 from models import (
     AuditEntry,
+    DashboardView,
     EntitlementsView,
     KycSubmitRequest,
     OnboardingView,
@@ -429,6 +430,13 @@ def get_accounts_client() -> AccountsClient:
     return AccountsClient(url)
 
 
+def get_accounts_client_optional() -> AccountsClient | None:
+    """Like get_accounts_client but returns None when unconfigured — so the
+    dashboard still renders (with empty balances) before funding is wired."""
+    url = os.environ.get("ACCOUNTS_SERVICE_URL")
+    return AccountsClient(url) if url else None
+
+
 @app.get("/v1/funding/balances")
 def funding_balances(
     asset: str,
@@ -470,6 +478,38 @@ def funding_withdraw(
     _audit(db, user.tenant_id, user.id, "funding.withdraw", f"{body.amount} {body.asset}")
     db.commit()
     return result
+
+
+@app.get("/v1/dashboard", response_model=DashboardView)
+def dashboard(
+    identity: Identity = Depends(current_identity),
+    db: Session = Depends(get_session),
+    ac: AccountsClient | None = Depends(get_accounts_client_optional),
+) -> DashboardView:
+    """One aggregated per-tenant view for the frontend: profile + entitlements +
+    balances. Balances are empty (not an error) when funding isn't wired yet."""
+    user = _load_user(db, identity.uid)
+    if user is None:
+        raise HTTPException(status_code=404, detail="no session — POST /v1/sessions first")
+    ent = billing.entitlements_for(user.tenant.plan)
+    balances: list[dict] = []
+    if ac is not None:
+        try:
+            balances = ac.all_balances(user.tenant.id)
+        except Exception:
+            logger.warning("dashboard: balances fetch failed for tenant=%s", user.tenant.id)
+    return DashboardView(
+        profile=_to_profile(user),
+        entitlements=EntitlementsView(
+            plan=user.tenant.plan,
+            subscription_status=user.tenant.subscription_status,
+            paper_trading=ent.paper_trading,
+            live_trading=ent.live_trading,
+            markets=ent.markets,
+            max_live_capital_usd=ent.max_live_capital_usd,
+        ),
+        balances=balances,
+    )
 
 
 @app.get("/v1/audit", response_model=list[AuditEntry])

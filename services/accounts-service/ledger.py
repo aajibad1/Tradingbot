@@ -40,6 +40,21 @@ def balance(db: Session, tenant_id: str, asset: str,
     return _d(total)
 
 
+def list_balances(db: Session, tenant_id: str) -> list[dict]:
+    """All non-zero-touched assets for a tenant with available + reserved."""
+    assets = db.execute(
+        select(Posting.asset).where(Posting.tenant_id == tenant_id).distinct()
+    ).scalars().all()
+    out = []
+    for asset in sorted(assets):
+        out.append({
+            "asset": asset,
+            "available": float(balance(db, tenant_id, asset, AccountType.AVAILABLE)),
+            "reserved": float(balance(db, tenant_id, asset, AccountType.RESERVED)),
+        })
+    return out
+
+
 def _post(db: Session, kind: TxnKind, legs: list[tuple[str, AccountType, Decimal]],
           asset: str, detail: str) -> Transaction:
     """Write a transaction from (tenant, account_type, signed_amount) legs after

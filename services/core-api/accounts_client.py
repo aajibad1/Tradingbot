@@ -48,3 +48,8 @@ class AccountsClient:
         )
         r.raise_for_status()
         return r.json()
+
+    def all_balances(self, tenant: str) -> list[dict]:
+        r = httpx.get(f"{self.base_url}/v1/accounts/{tenant}/balances/all", timeout=self.timeout)
+        r.raise_for_status()
+        return r.json().get("balances", [])

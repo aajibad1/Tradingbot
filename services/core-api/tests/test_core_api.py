@@ -374,6 +374,10 @@ class _FakeAccounts:
     def balances(self, tenant, asset):
         return self._bal(tenant, asset)
 
+    def all_balances(self, tenant):
+        return [{"asset": a, "available": v, "reserved": 0.0}
+                for (t, a), v in self.avail.items() if t == tenant]
+
     def _bal(self, tenant, asset):
         return {"tenant_id": tenant, "asset": asset,
                 "available": self.avail.get((tenant, asset), 0.0), "reserved": 0.0}
@@ -384,8 +388,10 @@ def accounts(client):
     import main
     fake = _FakeAccounts()
     main.app.dependency_overrides[main.get_accounts_client] = lambda: fake
+    main.app.dependency_overrides[main.get_accounts_client_optional] = lambda: fake
     yield fake
     main.app.dependency_overrides.pop(main.get_accounts_client, None)
+    main.app.dependency_overrides.pop(main.get_accounts_client_optional, None)
 
 
 def test_deposit_then_balance(client, accounts):
@@ -421,6 +427,28 @@ def test_funding_audited(client, accounts):
     client.post("/v1/funding/deposit", headers=h, json={"asset": "USD", "amount": "1000"})
     actions = [e["action"] for e in client.get("/v1/audit", headers=h).json()]
     assert "funding.deposit" in actions
+
+
+def test_dashboard_aggregates_profile_entitlements_balances(client, accounts):
+    h = _ready_pro(client, "dsh-1")              # onboarded + pro plan
+    # fund via the API so the fake records under the real tenant id
+    client.post("/v1/funding/deposit", headers=h, json={"asset": "USD", "amount": "2500"})
+    d = client.get("/v1/dashboard", headers=h).json()
+    assert d["profile"]["onboarding_status"] == "trading_ready"
+    assert d["entitlements"]["plan"] == "pro"
+    assert d["entitlements"]["live_trading"] is True
+    usd = [b for b in d["balances"] if b["asset"] == "USD"]
+    assert usd and usd[0]["available"] == 2500.0
+
+
+def test_dashboard_works_without_funding_configured(client, monkeypatch):
+    # no accounts override + ACCOUNTS_SERVICE_URL unset → balances empty, still 200
+    monkeypatch.delenv("ACCOUNTS_SERVICE_URL", raising=False)
+    h = _auth("dsh-2", "u@x.com")
+    client.post("/v1/sessions", headers=h)
+    d = client.get("/v1/dashboard", headers=h)
+    assert d.status_code == 200
+    assert d.json()["balances"] == []
 
 
 def test_funding_503_when_unconfigured(client, monkeypatch):
