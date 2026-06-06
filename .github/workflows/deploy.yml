@@ -52,6 +52,7 @@ jobs:
           - accounts-service
           - account-link-service
           - corridor-engine
+          - opportunity-ranker
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
     steps:
