@@ -10,6 +10,10 @@ terraform {
       source  = "hashicorp/google-beta"
       version = "~> 6.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 
   # Backend is configured per-environment (see infra/terraform/environments/*/main.tf).
@@ -207,6 +211,39 @@ locals {
       allow_public_invoke = true
       bigquery_reader     = true
     }
+    # ----- Control plane (multi-tenant SaaS) — Cloud SQL Postgres backed -----
+    # core-api: identity/tenant/RBAC, onboarding, billing, audit, funding.
+    # Public (frontend + Stripe/Clerk webhooks); auth is per-request (Clerk JWT
+    # / webhook signatures), not Cloud Run IAM.
+    "core-api" = {
+      secrets             = ["STRIPE_WEBHOOK_SECRET", "CLERK_WEBHOOK_SECRET"]
+      publish_topics      = []
+      subscribe_subs      = []
+      cpu_idle            = true
+      allow_public_invoke = true
+      env = {
+        DATABASE_URL  = module.cloud_sql.database_url
+        AUTH_PROVIDER = "clerk"
+        # ACCOUNTS_SERVICE_URL is set post-deploy (avoids a Cloud Run url cycle);
+        # funding endpoints return 503 until it's populated.
+      }
+    }
+    # accounts-service: internal double-entry ledger. Internal-only.
+    "accounts-service" = {
+      secrets        = []
+      publish_topics = []
+      subscribe_subs = []
+      cpu_idle       = true
+      env            = { DATABASE_URL = module.cloud_sql.database_url }
+    }
+    # corridor-engine: Africa corridor scoring (alert-only). Emits viable
+    # corridors to arb-corridor-alerts. Internal-only.
+    "corridor-engine" = {
+      secrets        = []
+      publish_topics = ["arb-corridor-alerts", "arb-audit-log"]
+      subscribe_subs = []
+      cpu_idle       = true
+    }
   }
 
   # Flat list of every distinct secret ID used anywhere in the system.
@@ -225,6 +262,8 @@ resource "google_project_service" "required" {
     "bigquery.googleapis.com",
     "secretmanager.googleapis.com",
     "redis.googleapis.com",
+    "sqladmin.googleapis.com",
+    "servicenetworking.googleapis.com",
     "artifactregistry.googleapis.com",
     "vpcaccess.googleapis.com",
     "monitoring.googleapis.com",
@@ -325,6 +364,22 @@ module "memorystore" {
 }
 
 # ---------------------------------------------------------------------------
+# Cloud SQL Postgres — control-plane system-of-record (core-api) + internal
+# ledger (accounts-service). Private IP, reached over the VPC connector.
+# ---------------------------------------------------------------------------
+module "cloud_sql" {
+  source = "./modules/cloud-sql"
+
+  project_id  = var.project_id
+  region      = var.region
+  environment = var.environment
+  network_id  = google_compute_network.vpc.id
+  labels      = local.common_labels
+
+  depends_on = [google_project_service.required]
+}
+
+# ---------------------------------------------------------------------------
 # Secret Manager — create every distinct secret, no values written here
 # ---------------------------------------------------------------------------
 module "secrets" {
@@ -375,6 +430,7 @@ module "cloud_run" {
   depends_on = [
     module.pubsub,
     module.secrets,
+    module.cloud_sql,
     google_artifact_registry_repository.crypto_arb,
   ]
 }
