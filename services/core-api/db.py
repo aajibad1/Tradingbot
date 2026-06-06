@@ -156,6 +156,22 @@ class OnboardingEvent(Base):
     tenant: Mapped[Tenant] = relationship(back_populates="events")
 
 
+class AuditLog(Base):
+    """Append-only compliance trail of significant actions (who did what, when).
+    Distinct from onboarding_events (state-machine analytics): this is the
+    auditor-facing record the managed-custody model requires, surfaced behind the
+    VIEW_AUDIT_LOG permission."""
+
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    actor: Mapped[str] = mapped_column(String(128))   # user id, or 'stripe'/'system'
+    action: Mapped[str] = mapped_column(String(64))   # e.g. 'live.enabled', 'kyc.verified'
+    detail: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+
+
 class WebhookEvent(Base):
     """Idempotency ledger for inbound webhooks (Stripe now, Clerk later). The
     provider's event id is the PK, so a redelivered event is a no-op."""

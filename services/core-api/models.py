@@ -53,6 +53,13 @@ class PermissionsView(BaseModel):
     permissions: list[str]
 
 
+class AuditEntry(BaseModel):
+    actor: str
+    action: str
+    detail: str
+    created_at: datetime
+
+
 class OnboardingView(BaseModel):
     """Current onboarding position + what the user should do next."""
 

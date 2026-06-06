@@ -29,6 +29,7 @@ import billing
 import onboarding
 from auth import Identity, current_identity
 from db import (
+    AuditLog,
     KycStatus,
     Market,
     OnboardingEvent,
@@ -42,6 +43,7 @@ from db import (
     init_db,
 )
 from models import (
+    AuditEntry,
     EntitlementsView,
     KycSubmitRequest,
     OnboardingView,
@@ -93,6 +95,11 @@ def _load_user(db: Session, uid: str) -> User | None:
     return db.get(User, uid)
 
 
+def _audit(db: Session, tenant_id: str, actor: str, action: str, detail: str = "") -> None:
+    """Append a compliance audit entry. Caller commits."""
+    db.add(AuditLog(tenant_id=tenant_id, actor=actor, action=action, detail=detail))
+
+
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
@@ -119,6 +126,7 @@ def create_session(
     user.roles.append(UserRole(user_id=identity.uid, role=Role.OWNER))
     db.add(tenant)
     db.add(user)
+    _audit(db, tenant.id, identity.uid, "account.created", identity.email or "")
     db.commit()
     logger.info("created tenant=%s for user=%s", tenant.id, identity.uid)
     return _to_profile(user)
@@ -214,6 +222,7 @@ def submit_kyc(
                            from_status=tenant.onboarding_status, to_status=tenant.onboarding_status,
                            detail=f"name={req.full_name}"))
     _transition(db, tenant, OnboardingStatus.IDENTITY_VERIFIED, "kyc.verified")
+    _audit(db, tenant.id, identity.uid, "kyc.verified", f"name={req.full_name}")
     db.commit()
     return _view(tenant)
 
@@ -226,6 +235,7 @@ def submit_onboarding(
     tenant = _require_tenant(db, identity)
     decision = onboarding.evaluate(tenant.market, tenant.region, tenant.kyc_status)
     _transition(db, tenant, decision.final_status, "policy.evaluated", decision.reason)
+    _audit(db, tenant.id, identity.uid, f"onboarding.{decision.final_status.value}", decision.reason)
     db.commit()
     logger.info("tenant=%s onboarding -> %s (%s)", tenant.id,
                 decision.final_status.value, decision.reason)
@@ -334,9 +344,27 @@ def live_enable(
             detail=f"onboarding is '{tenant.onboarding_status.value}', not trading_ready",
         )
     tenant.live_enabled = True
-    db.add(OnboardingEvent(tenant_id=tenant.id, action="live.enabled",
-                           from_status=tenant.onboarding_status, to_status=tenant.onboarding_status,
-                           detail=f"plan={tenant.plan.value}"))
+    _audit(db, tenant.id, user.id, "live.enabled", f"plan={tenant.plan.value}")
     db.commit()
     logger.info("tenant=%s live-enabled (plan=%s)", tenant.id, tenant.plan.value)
     return _to_profile(user)
+
+
+@app.get("/v1/audit", response_model=list[AuditEntry])
+def audit_log(
+    limit: int = 50,
+    user: User = Depends(require_permission(Permission.VIEW_AUDIT_LOG)),
+    db: Session = Depends(get_session),
+) -> list[AuditEntry]:
+    """The tenant's compliance audit trail, newest first. Requires VIEW_AUDIT_LOG."""
+    rows = (
+        db.query(AuditLog)
+        .filter(AuditLog.tenant_id == user.tenant_id)
+        .order_by(AuditLog.id.desc())
+        .limit(max(1, min(limit, 500)))
+        .all()
+    )
+    return [
+        AuditEntry(actor=r.actor, action=r.action, detail=r.detail, created_at=r.created_at)
+        for r in rows
+    ]

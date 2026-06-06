@@ -269,6 +269,46 @@ def test_live_enable_succeeds_when_all_gates_pass(client):
     assert r.json()["live_enabled"] is True
 
 
+# --- audit trail --------------------------------------------------------------
+
+def test_audit_trail_records_key_actions(client):
+    h = _ready_pro(client, "au-1")              # session + onboarding + billing
+    client.post("/v1/trading/live-enable", headers=h)
+    entries = client.get("/v1/audit", headers=h).json()
+    actions = [e["action"] for e in entries]
+    # newest first; the lifecycle is captured
+    assert "live.enabled" in actions
+    assert "kyc.verified" in actions
+    assert "account.created" in actions
+    assert actions[0] == "live.enabled"         # most recent on top
+    # every entry has an actor
+    assert all(e["actor"] for e in entries)
+
+
+def test_audit_requires_permission(client):
+    # downgrade the user to OPERATOR (lacks VIEW_AUDIT_LOG) and confirm 403
+    import db as dbmod
+    from db import Role
+    h = _auth("au-2", "k@x.com")
+    client.post("/v1/sessions", headers=h)
+    session = next(dbmod.get_session())
+    ur = session.query(dbmod.UserRole).filter_by(user_id="au-2").one()
+    ur.role = Role.OPERATOR
+    session.commit()
+    session.close()
+    assert client.get("/v1/audit", headers=h).status_code == 403
+
+
+def test_audit_isolated_per_tenant(client):
+    ha = _ready_pro(client, "au-3")
+    _ready_pro(client, "au-4")
+    # au-3 only sees its own tenant's entries
+    entries = client.get("/v1/audit", headers=ha).json()
+    assert entries
+    details = " ".join(e["detail"] for e in entries)
+    assert "au-4" not in details
+
+
 def test_local_mode_rejects_non_local_bearer(client):
     # a raw token (not 'local:...') is refused when no Firebase is configured
     r = client.get("/v1/me", headers={"Authorization": "Bearer some-random-jwt"})

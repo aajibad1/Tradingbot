@@ -17,6 +17,16 @@ CREATE TABLE IF NOT EXISTS tenants (
 );
 CREATE INDEX IF NOT EXISTS idx_tenants_stripe_customer ON tenants(stripe_customer_id);
 
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id          BIGSERIAL    PRIMARY KEY,
+    tenant_id   VARCHAR(64)  NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    actor       VARCHAR(128) NOT NULL,                  -- user id, or 'stripe'/'system'
+    action      VARCHAR(64)  NOT NULL,                  -- e.g. 'live.enabled', 'kyc.verified'
+    detail      VARCHAR(500) NOT NULL DEFAULT '',
+    created_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant ON audit_logs(tenant_id);
+
 CREATE TABLE IF NOT EXISTS webhook_events (
     id          VARCHAR(128) PRIMARY KEY,                -- provider event id (idempotency)
     source      VARCHAR(32)  NOT NULL,                   -- 'stripe' | 'clerk'
