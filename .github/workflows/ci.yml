@@ -22,6 +22,7 @@ jobs:
     outputs:
       infra: ${{ steps.filter.outputs.infra }}
       python: ${{ steps.filter.outputs.python }}
+      frontend: ${{ steps.filter.outputs.frontend }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -34,6 +35,9 @@ jobs:
             python:
               - 'services/**'
               - 'shared/**'
+              - '.github/workflows/**'
+            frontend:
+              - 'apps/frontend/**'
               - '.github/workflows/**'
 
   # ---------------------------------------------------------------------------
@@ -93,6 +97,11 @@ jobs:
           - sentiment-service
           - notification-dispatcher
           - fx-rate-service
+          - core-api
+          - accounts-service
+          - corridor-engine
+          - opportunity-ranker
+          - account-link-service
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -130,6 +139,11 @@ jobs:
           - sentiment-service
           - notification-dispatcher
           - fx-rate-service
+          - core-api
+          - accounts-service
+          - corridor-engine
+          - opportunity-ranker
+          - account-link-service
     services:
       redis:
         image: redis:7
@@ -229,6 +243,11 @@ jobs:
           - sentiment-service
           - notification-dispatcher
           - fx-rate-service
+          - core-api
+          - accounts-service
+          - corridor-engine
+          - opportunity-ranker
+          - account-link-service
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -256,3 +275,24 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: pip install bandit==1.7.10
       - run: bandit -r services/ shared/ -ll -ii
+
+  # ---------------------------------------------------------------------------
+  # Frontend — typecheck + production build (Next.js)
+  # ---------------------------------------------------------------------------
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npx tsc --noEmit
+      - run: npm run build
