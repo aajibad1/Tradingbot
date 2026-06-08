@@ -174,6 +174,22 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
 
 
+class KycReview(Base):
+    """Append-only KYC decision record — the auditable trail behind a tenant's
+    kyc_status flag (who/what/when/result). Required for the regulated custody
+    model; the status flag alone isn't enough for compliance review."""
+
+    __tablename__ = "kyc_reviews"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    full_name: Mapped[str] = mapped_column(String(200))
+    document_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    result: Mapped[KycStatus] = mapped_column(_enum_col(KycStatus))
+    reviewer: Mapped[str] = mapped_column(String(64))   # 'auto-stub', or a reviewer id
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+
+
 class WebhookEvent(Base):
     """Idempotency ledger for inbound webhooks (Stripe now, Clerk later). The
     provider's event id is the PK, so a redelivered event is a no-op."""

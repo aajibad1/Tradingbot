@@ -38,6 +38,7 @@ from accounts_client import AccountsClient
 from auth import Identity, current_identity
 from db import (
     AuditLog,
+    KycReview,
     KycStatus,
     OnboardingEvent,
     OnboardingStatus,
@@ -54,6 +55,7 @@ from models import (
     AddMemberRequest,
     AuditEntry,
     ChangeRoleRequest,
+    KycReviewEntry,
     DashboardView,
     DisclosuresView,
     EntitlementsView,
@@ -244,6 +246,9 @@ def submit_kyc(
     db.add(OnboardingEvent(tenant_id=tenant.id, action="kyc.submitted",
                            from_status=tenant.onboarding_status, to_status=tenant.onboarding_status,
                            detail=f"name={req.full_name}"))
+    # Auditable KYC decision record (the trail behind the status flag).
+    db.add(KycReview(tenant_id=tenant.id, full_name=req.full_name, document_type=req.document_type,
+                     result=KycStatus.VERIFIED, reviewer="auto-stub"))
     _transition(db, tenant, OnboardingStatus.IDENTITY_VERIFIED, "kyc.verified")
     _audit(db, tenant.id, identity.uid, "kyc.verified", f"name={req.full_name}")
     db.commit()
@@ -548,6 +553,25 @@ def audit_log(
     )
     return [
         AuditEntry(actor=r.actor, action=r.action, detail=r.detail, created_at=r.created_at)
+        for r in rows
+    ]
+
+
+@app.get("/v1/kyc/reviews", response_model=list[KycReviewEntry])
+def kyc_reviews(
+    user: User = Depends(require_permission(Permission.VIEW_AUDIT_LOG)),
+    db: Session = Depends(get_session),
+) -> list[KycReviewEntry]:
+    """The tenant's KYC decision history, newest first. Requires VIEW_AUDIT_LOG."""
+    rows = (
+        db.query(KycReview)
+        .filter(KycReview.tenant_id == user.tenant_id)
+        .order_by(KycReview.id.desc())
+        .all()
+    )
+    return [
+        KycReviewEntry(full_name=r.full_name, document_type=r.document_type,
+                       result=r.result, reviewer=r.reviewer, created_at=r.created_at)
         for r in rows
     ]
 

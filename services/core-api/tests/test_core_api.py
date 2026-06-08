@@ -276,6 +276,30 @@ def test_live_enable_succeeds_when_all_gates_pass(client):
     assert r.json()["live_enabled"] is True
 
 
+def test_kyc_submit_creates_review_record(client):
+    h = _auth("kyc-1", "k1@x.com")
+    client.post("/v1/sessions", headers=h)
+    client.post("/v1/onboarding/region", headers=h, json={"market": "global", "country": "US"})
+    client.post("/v1/onboarding/kyc", headers=h, json={"full_name": "Jane Doe", "document_type": "passport"})
+    reviews = client.get("/v1/kyc/reviews", headers=h).json()
+    assert len(reviews) == 1
+    assert reviews[0]["full_name"] == "Jane Doe"
+    assert reviews[0]["result"] == "verified"
+    assert reviews[0]["reviewer"] == "auto-stub"
+
+
+def test_kyc_reviews_requires_permission(client):
+    import db as dbmod
+    from db import Role
+    h = _auth("kyc-2", "k2@x.com")
+    client.post("/v1/sessions", headers=h)
+    session = next(dbmod.get_session())
+    session.query(dbmod.UserRole).filter_by(user_id="kyc-2").one().role = Role.OPERATOR  # no VIEW_AUDIT_LOG
+    session.commit()
+    session.close()
+    assert client.get("/v1/kyc/reviews", headers=h).status_code == 403
+
+
 def test_disclosures_default_not_accepted_then_accept(client):
     h = _auth("dsc-1", "d@x.com")
     client.post("/v1/sessions", headers=h)

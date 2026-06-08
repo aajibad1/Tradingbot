@@ -60,6 +60,14 @@ class AuditEntry(BaseModel):
     created_at: datetime
 
 
+class KycReviewEntry(BaseModel):
+    full_name: str
+    document_type: str | None
+    result: KycStatus
+    reviewer: str
+    created_at: datetime
+
+
 class DisclosuresView(BaseModel):
     current_version: str
     accepted_version: str | None

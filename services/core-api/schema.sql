@@ -28,6 +28,17 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant ON audit_logs(tenant_id);
 
+CREATE TABLE IF NOT EXISTS kyc_reviews (
+    id            BIGSERIAL    PRIMARY KEY,
+    tenant_id     VARCHAR(64)  NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    full_name     VARCHAR(200) NOT NULL,
+    document_type VARCHAR(64),
+    result        VARCHAR(16)  NOT NULL,                  -- none|pending|verified|rejected
+    reviewer      VARCHAR(64)  NOT NULL,                  -- 'auto-stub' or a reviewer id
+    created_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_kyc_reviews_tenant ON kyc_reviews(tenant_id);
+
 CREATE TABLE IF NOT EXISTS webhook_events (
     id          VARCHAR(128) PRIMARY KEY,                -- provider event id (idempotency)
     source      VARCHAR(32)  NOT NULL,                   -- 'stripe' | 'clerk'
