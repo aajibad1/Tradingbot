@@ -39,7 +39,6 @@ from auth import Identity, current_identity
 from db import (
     AuditLog,
     KycStatus,
-    Market,
     OnboardingEvent,
     OnboardingStatus,
     Role,
