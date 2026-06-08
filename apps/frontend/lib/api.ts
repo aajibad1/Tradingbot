@@ -100,6 +100,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ asset, amount }),
     }),
+  liveEnable: () => req<Profile>("/v1/trading/live-enable", { method: "POST" }),
 };
 
 export { ApiError };

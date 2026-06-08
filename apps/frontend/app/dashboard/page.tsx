@@ -9,12 +9,25 @@ export default function Dashboard() {
   const [data, setData] = useState<DashboardView | null>(null);
   const [err, setErr] = useState("");
   const [amount, setAmount] = useState("1000");
+  const [liveMsg, setLiveMsg] = useState("");
 
   async function refresh() {
     try {
       setData(await api.dashboard());
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : String(e));
+    }
+  }
+
+  async function goLive() {
+    setLiveMsg("");
+    try {
+      await api.liveEnable();
+      await refresh();
+      setLiveMsg("Live trading enabled (still gated by the validation run).");
+    } catch (e) {
+      // The layered gate returns a precise reason: 403 (permission/plan) or 409 (onboarding).
+      setLiveMsg(e instanceof ApiError ? `Blocked: ${e.message}` : String(e));
     }
   }
 
@@ -59,6 +72,16 @@ export default function Dashboard() {
             {profile.live_enabled ? "live-enabled" : "paper"}
           </span>
         </div>
+        {!profile.live_enabled && (
+          <div className="row" style={{ marginTop: 10 }}>
+            <button onClick={goLive}>Go live</button>
+            <span className="muted">
+              Requires the ENABLE_LIVE_TRADING role, a live-capable plan, and
+              trading_ready onboarding — and a passing validation run.
+            </span>
+          </div>
+        )}
+        {liveMsg && <p className={liveMsg.startsWith("Blocked") ? "err" : "muted"}>{liveMsg}</p>}
       </div>
 
       <div className="panel">
