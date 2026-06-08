@@ -201,16 +201,19 @@ locals {
       subscribe_subs = []
       cpu_idle       = true
     }
-    # Dashboard-api — the only browser-facing service. Aggregates Redis +
-    # BigQuery into one /api/summary endpoint and serves the static dashboard.
-    # Public (allUsers/run.invoker) so a browser can hit it without an ID
-    # token. Read-only by design: no secrets, no Pub/Sub publish.
+    # Dashboard-api — INTERNAL ops console (live PnL / positions / exposure /
+    # kill-switch status). NOT public: this is operational + financial data, so
+    # it must not be allUsers-invokable. allow_public_invoke=false →
+    # INGRESS_TRAFFIC_INTERNAL_ONLY. Operator browser access for now via
+    #   gcloud run services proxy dashboard-api --region <region>
+    # (authenticated, no public exposure). Production follow-up: front it with an
+    # external HTTPS LB + IAP (needs an OAuth brand — the one external step).
     "dashboard-api" = {
       secrets             = []
       publish_topics      = []
       subscribe_subs      = []
       cpu_idle            = true
-      allow_public_invoke = true
+      allow_public_invoke = false
       bigquery_reader     = true
     }
     # ----- Control plane (multi-tenant SaaS) — Cloud SQL Postgres backed -----
