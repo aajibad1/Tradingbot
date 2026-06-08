@@ -529,6 +529,30 @@ def test_owner_can_add_list_and_remove_members(client):
     assert {m["user_id"] for m in remaining} == {"tm-owner"}
 
 
+def test_change_member_role(client):
+    owner = _auth("rc-owner", "rc@x.com")
+    client.post("/v1/sessions", headers=owner)
+    client.post("/v1/team/members", headers=owner,
+                json={"member_id": "rc-mem", "role": "analyst"})
+    out = client.patch("/v1/team/members/rc-mem", headers=owner, json={"role": "operator"}).json()
+    mem = next(m for m in out if m["user_id"] == "rc-mem")
+    assert mem["roles"] == ["operator"]
+
+
+def test_change_role_rejects_owner_and_missing(client):
+    owner = _auth("rc2-owner", "rc2@x.com")
+    client.post("/v1/sessions", headers=owner)
+    client.post("/v1/team/members", headers=owner, json={"member_id": "rc2-mem", "role": "analyst"})
+    assert client.patch("/v1/team/members/rc2-mem", headers=owner, json={"role": "owner"}).status_code == 400
+    assert client.patch("/v1/team/members/nope", headers=owner, json={"role": "analyst"}).status_code == 404
+
+
+def test_cannot_demote_last_owner(client):
+    owner = _auth("rc3-owner", "rc3@x.com")
+    client.post("/v1/sessions", headers=owner)
+    assert client.patch("/v1/team/members/rc3-owner", headers=owner, json={"role": "admin"}).status_code == 400
+
+
 def test_add_member_rejects_existing_user(client):
     owner = _auth("tm2-owner", "o2@x.com")
     client.post("/v1/sessions", headers=owner)

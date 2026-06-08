@@ -50,6 +50,15 @@ export default function Team() {
     }
   }
 
+  async function changeRole(id: string, newRole: string) {
+    setErr("");
+    try {
+      setMembers(await api.changeRole(id, newRole));
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : String(e));
+    }
+  }
+
   return (
     <div className="panel">
       <div className="row" style={{ justifyContent: "space-between" }}>
@@ -66,7 +75,16 @@ export default function Team() {
               <tr key={m.user_id}>
                 <td>{m.user_id}</td>
                 <td>{m.email ?? "—"}</td>
-                <td>{m.roles.join(", ")}</td>
+                <td>
+                  {m.roles.includes("owner") ? (
+                    "owner"
+                  ) : (
+                    <select value={m.roles[0] ?? "analyst"}
+                            onChange={(e) => changeRole(m.user_id, e.target.value)}>
+                      {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  )}
+                </td>
                 <td>
                   {!m.roles.includes("owner") && (
                     <button className="secondary" onClick={() => remove(m.user_id)}>Remove</button>

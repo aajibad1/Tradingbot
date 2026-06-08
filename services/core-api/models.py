@@ -82,6 +82,10 @@ class AddMemberRequest(BaseModel):
     role: Role = Role.ANALYST
 
 
+class ChangeRoleRequest(BaseModel):
+    role: Role
+
+
 class DashboardView(BaseModel):
     """Aggregated per-tenant view for the frontend dashboard."""
 

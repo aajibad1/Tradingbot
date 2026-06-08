@@ -53,6 +53,7 @@ from models import (
     AcceptDisclosuresRequest,
     AddMemberRequest,
     AuditEntry,
+    ChangeRoleRequest,
     DashboardView,
     DisclosuresView,
     EntitlementsView,
@@ -630,6 +631,37 @@ def add_member(
     return _members(db, user.tenant_id)
 
 
+def _owner_count(db: Session, tenant_id: str) -> int:
+    return sum(
+        1 for u in db.query(User).filter(User.tenant_id == tenant_id).all()
+        if any(r.role is Role.OWNER for r in u.roles)
+    )
+
+
+@app.patch("/v1/team/members/{member_id}", response_model=list[TeamMember])
+def change_member_role(
+    member_id: str,
+    req: ChangeRoleRequest,
+    user: User = Depends(require_permission(Permission.MANAGE_TEAM)),
+    db: Session = Depends(get_session),
+) -> list[TeamMember]:
+    """Set a member's role (replaces their roles). Cannot assign OWNER, and cannot
+    demote the last owner."""
+    if req.role is Role.OWNER:
+        raise HTTPException(status_code=400, detail="cannot assign OWNER via role change")
+    member = _load_user(db, member_id)
+    if member is None or member.tenant_id != user.tenant_id:
+        raise HTTPException(status_code=404, detail="member not found in this tenant")
+    is_owner = any(r.role is Role.OWNER for r in member.roles)
+    if is_owner and _owner_count(db, user.tenant_id) <= 1:
+        raise HTTPException(status_code=400, detail="cannot demote the last owner")
+    member.roles.clear()
+    member.roles.append(UserRole(user_id=member_id, role=req.role))
+    _audit(db, user.tenant_id, user.id, "team.role_changed", f"{member_id} -> {req.role.value}")
+    db.commit()
+    return _members(db, user.tenant_id)
+
+
 @app.delete("/v1/team/members/{member_id}", response_model=list[TeamMember])
 def remove_member(
     member_id: str,
@@ -643,14 +675,8 @@ def remove_member(
     member = _load_user(db, member_id)
     if member is None or member.tenant_id != user.tenant_id:
         raise HTTPException(status_code=404, detail="member not found in this tenant")
-    member_roles = {r.role for r in member.roles}
-    if Role.OWNER in member_roles:
-        owners = sum(
-            1 for u in db.query(User).filter(User.tenant_id == user.tenant_id).all()
-            if any(r.role is Role.OWNER for r in u.roles)
-        )
-        if owners <= 1:
-            raise HTTPException(status_code=400, detail="cannot remove the last owner")
+    if any(r.role is Role.OWNER for r in member.roles) and _owner_count(db, user.tenant_id) <= 1:
+        raise HTTPException(status_code=400, detail="cannot remove the last owner")
     db.delete(member)
     _audit(db, user.tenant_id, user.id, "team.member_removed", member_id)
     db.commit()

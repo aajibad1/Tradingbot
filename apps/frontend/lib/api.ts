@@ -127,6 +127,11 @@ export const api = {
     }),
   removeMember: (id: string) =>
     req<TeamMember[]>(`/v1/team/members/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  changeRole: (id: string, role: string) =>
+    req<TeamMember[]>(`/v1/team/members/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    }),
 };
 
 export { ApiError };
