@@ -8,21 +8,48 @@ Monorepo of independent Python 3.12 microservices that talk over GCP Pub/Sub. Ea
 
 ```
 services/
+  # Execution plane — Global market (crypto), paper mode
   market-data/             CCXT Pro WebSocket collectors → arb-market-data
   funding-rate-service/    60s polling of CoinGlass / ArbitrageScanner / CCXT → arb-funding-rates
   opportunity-engine/      Subscribes to ticks + funding, runs strategies → arb-opportunities
-  risk-engine/             Choke point. Approves/rejects, owns Redis risk:* keys, kill switch
-  paper-trader/            Simulates approved opportunities → arb-trade-fills
+  risk-engine/             Choke point. Gates + forwards APPROVED opps (execute=True) → arb-approved;
+                           owns Redis risk:* keys, kill switch, reads eligibility:t:* + advisory rank
+  paper-trader/            Simulates arb-approved opportunities → arb-trade-fills
+  execution-orchestrator/  Hummingbot client for live orders (consumes arb-approved; stubbed gateway)
   trade-ledger/            Sole BigQuery writer; tax-export endpoint
+  opportunity-ranker/      AI advisory ranking (never gates; risk-engine calls it fail-open)
+  # Execution plane — Africa market (FX/stablecoin corridors), alert-only
+  corridor-engine/         Scores corridors w/ settlement risk → arb-corridor-alerts
+  # Control plane — multi-tenant SaaS (Cloud SQL Postgres)
+  core-api/                Identity/tenant/RBAC, onboarding state machine, Stripe billing→entitlements,
+                           live-enable gate (perm×plan×onboarding×funding), audit, funding, dashboard,
+                           Clerk webhook sync. Publishes eligibility:t:* for risk-engine.
+  accounts-service/        Internal double-entry ledger (per-tenant balances), paper mode
+  account-link-service/    Non-custodial key-link skeleton (SUPERSEDED by managed custody)
+  # Platform services
+  sentiment-service/  notification-dispatcher/  fx-rate-service/  dashboard-api/  ai-ops-agent/
+apps/
+  frontend/                Next.js (App Router): onboarding stepper + dashboard → core-api
 shared/
-  models/                  Pydantic schemas shared across every service (Opportunity, Trade, FundingRate, RiskState, ...)
+  models/                  Pydantic schemas shared across every service (Opportunity, Trade, RiskState, ...)
   pubsub/publisher.py      Topic enum + EventPublisher/NullPublisher factory
+  tenant.py                Tenant namespacing: risk_key, exchange_secret_id, eligibility_key
   utils/                   fee_calculator, exchange_normalizer, slippage_model
-dashboard/index.html       Single-file ops UI
-docs/ARCHITECTURE.md       Full data-flow + risk-control reference
+docs/PLATFORM_ARCHITECTURE.md   Multi-tenant two-market target + repo reconciliation
+docs/REGULATORY_BRIEF.md        Custody/licensing brief for counsel
+docs/ARCHITECTURE.md            Original single-tenant data-flow + risk-control reference
 ```
 
-Note: `docs/ARCHITECTURE.md` also describes `ai-ops-agent` and `execution-orchestrator` services — these are planned but not yet in this repo.
+Two markets, one core: **Global** = crypto funding-carry/basis (execution loop, paper);
+**Africa** = FX/stablecoin corridor arb (alert-only). See `docs/PLATFORM_ARCHITECTURE.md`.
+The control plane (`core-api`/`accounts-service`) is **Cloud SQL Postgres-backed** and runs
+locally on SQLite with no cloud deps (`AUTH_PROVIDER` unset = local bearer; managed custody
+decided — see `docs/REGULATORY_BRIEF.md`).
+
+End-to-end local smokes (no GCP):
+`./scripts/control_plane_smoke.sh` (onboarding→billing→funding→live-enable→dashboard) and
+`./scripts/paper_trade_local.sh` (risk-engine + paper-trader trade flow).
+Frontend: `cd apps/frontend && npm install && npm run dev` (needs core-api on :8080).
 
 ## Running tests
 
@@ -35,6 +62,12 @@ PYTHONPATH=.:services/paper-trader         python3 -m pytest services/paper-trad
 PYTHONPATH=.:services/market-data          python3 -m pytest services/market-data/tests/ -v
 PYTHONPATH=.:services/funding-rate-service python3 -m pytest services/funding-rate-service/tests/ -v
 PYTHONPATH=.:services/opportunity-engine   python3 -m pytest services/opportunity-engine/tests/ -v
+
+# Control-plane + new services (SQLite-backed; no cloud deps)
+PYTHONPATH=.:services/core-api             python3 -m pytest services/core-api/tests/ -v
+PYTHONPATH=.:services/accounts-service     python3 -m pytest services/accounts-service/tests/ -v
+PYTHONPATH=.:services/corridor-engine      python3 -m pytest services/corridor-engine/tests/ -v
+PYTHONPATH=.:services/opportunity-ranker   python3 -m pytest services/opportunity-ranker/tests/ -v
 
 # All services in one run (note PYTHONPATH order)
 PYTHONPATH=.:services/risk-engine:services/paper-trader:services/market-data:services/funding-rate-service \
