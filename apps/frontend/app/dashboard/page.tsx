@@ -1,21 +1,35 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, DashboardView, ApiError } from "@/lib/api";
+import { api, DashboardView, DisclosuresView, ApiError } from "@/lib/api";
 import { isSignedIn, signOut } from "@/lib/auth";
 
 export default function Dashboard() {
   const router = useRouter();
   const [data, setData] = useState<DashboardView | null>(null);
+  const [disc, setDisc] = useState<DisclosuresView | null>(null);
   const [err, setErr] = useState("");
   const [amount, setAmount] = useState("1000");
   const [liveMsg, setLiveMsg] = useState("");
 
   async function refresh() {
     try {
-      setData(await api.dashboard());
+      const [d, dv] = await Promise.all([api.dashboard(), api.disclosures()]);
+      setData(d);
+      setDisc(dv);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : String(e));
+    }
+  }
+
+  async function acceptDisclosures() {
+    if (!disc) return;
+    setLiveMsg("");
+    try {
+      await api.acceptDisclosures(disc.current_version);
+      await refresh();
+    } catch (e) {
+      setLiveMsg(e instanceof ApiError ? e.message : String(e));
     }
   }
 
@@ -76,12 +90,22 @@ export default function Dashboard() {
           </span>
         </div>
         {!profile.live_enabled && (
-          <div className="row" style={{ marginTop: 10 }}>
-            <button onClick={goLive}>Go live</button>
-            <span className="muted">
-              Requires the ENABLE_LIVE_TRADING role, a live-capable plan, and
-              trading_ready onboarding — and a passing validation run.
-            </span>
+          <div style={{ marginTop: 10 }}>
+            {disc && !disc.accepted && (
+              <div className="row" style={{ marginBottom: 8 }}>
+                <button className="secondary" onClick={acceptDisclosures}>
+                  Accept risk disclosures ({disc.current_version})
+                </button>
+                <span className="muted">Required before going live.</span>
+              </div>
+            )}
+            <div className="row">
+              <button onClick={goLive} disabled={!!disc && !disc.accepted}>Go live</button>
+              <span className="muted">
+                Requires the ENABLE_LIVE_TRADING role, a live-capable plan,
+                trading_ready onboarding, accepted disclosures, and funds.
+              </span>
+            </div>
           </div>
         )}
         {liveMsg && <p className={liveMsg.startsWith("Blocked") ? "err" : "muted"}>{liveMsg}</p>}

@@ -51,6 +51,12 @@ export interface TeamMember {
   roles: string[];
 }
 
+export interface DisclosuresView {
+  current_version: string;
+  accepted_version: string | null;
+  accepted: boolean;
+}
+
 export interface DashboardView {
   profile: Profile;
   entitlements: Entitlements;
@@ -107,6 +113,12 @@ export const api = {
       body: JSON.stringify({ asset, amount }),
     }),
   liveEnable: () => req<Profile>("/v1/trading/live-enable", { method: "POST" }),
+  disclosures: () => req<DisclosuresView>("/v1/disclosures"),
+  acceptDisclosures: (version: string) =>
+    req<DisclosuresView>("/v1/disclosures/accept", {
+      method: "POST",
+      body: JSON.stringify({ version }),
+    }),
   team: () => req<TeamMember[]>("/v1/team"),
   addMember: (member_id: string, email: string, role: string) =>
     req<TeamMember[]>("/v1/team/members", {
