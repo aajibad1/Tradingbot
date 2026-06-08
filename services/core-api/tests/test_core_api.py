@@ -243,6 +243,9 @@ def _ready_pro(client, uid, market="global", country="US"):
     client.post("/v1/onboarding/kyc", headers=h, json={"full_name": "T"})
     client.post("/v1/onboarding/submit", headers=h)
     _post_event(client, _event("checkout.session.completed", tid, plan="pro", event_id=f"evt-{uid}"))
+    # accept current disclosures so live-enable's disclosures gate passes
+    from main import DISCLOSURES_VERSION
+    client.post("/v1/disclosures/accept", headers=h, json={"version": DISCLOSURES_VERSION})
     return h
 
 
@@ -271,6 +274,35 @@ def test_live_enable_succeeds_when_all_gates_pass(client):
     r = client.post("/v1/trading/live-enable", headers=h)
     assert r.status_code == 200, r.text
     assert r.json()["live_enabled"] is True
+
+
+def test_disclosures_default_not_accepted_then_accept(client):
+    h = _auth("dsc-1", "d@x.com")
+    client.post("/v1/sessions", headers=h)
+    from main import DISCLOSURES_VERSION
+    v = client.get("/v1/disclosures", headers=h).json()
+    assert v["accepted"] is False and v["current_version"] == DISCLOSURES_VERSION
+    out = client.post("/v1/disclosures/accept", headers=h, json={"version": DISCLOSURES_VERSION}).json()
+    assert out["accepted"] is True
+
+
+def test_disclosures_reject_stale_version(client):
+    h = _auth("dsc-2", "d2@x.com")
+    client.post("/v1/sessions", headers=h)
+    r = client.post("/v1/disclosures/accept", headers=h, json={"version": "1999-old"})
+    assert r.status_code == 400
+
+
+def test_live_enable_blocked_without_disclosures(client):
+    # pro + trading_ready but disclosures NOT accepted → 412
+    h = _auth("dsc-3", "d3@x.com")
+    tid = client.post("/v1/sessions", headers=h).json()["tenant_id"]
+    client.post("/v1/onboarding/region", headers=h, json={"market": "global", "country": "US"})
+    client.post("/v1/onboarding/kyc", headers=h, json={"full_name": "T"})
+    client.post("/v1/onboarding/submit", headers=h)
+    _post_event(client, _event("checkout.session.completed", tid, plan="pro", event_id="evt-dsc3"))
+    r = client.post("/v1/trading/live-enable", headers=h)
+    assert r.status_code == 412
 
 
 def test_live_enable_blocked_without_funds(client, accounts):

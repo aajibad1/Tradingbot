@@ -60,6 +60,16 @@ class AuditEntry(BaseModel):
     created_at: datetime
 
 
+class DisclosuresView(BaseModel):
+    current_version: str
+    accepted_version: str | None
+    accepted: bool
+
+
+class AcceptDisclosuresRequest(BaseModel):
+    version: str
+
+
 class TeamMember(BaseModel):
     user_id: str
     email: str | None

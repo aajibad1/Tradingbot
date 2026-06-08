@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS tenants (
     plan               VARCHAR(16)  NOT NULL DEFAULT 'free',             -- free|starter|pro
     subscription_status VARCHAR(16) NOT NULL DEFAULT 'none',            -- none|active|past_due|canceled
     stripe_customer_id VARCHAR(64),
+    disclosures_version VARCHAR(32),                            -- accepted risk-disclosures version
     live_enabled       BOOLEAN      NOT NULL DEFAULT FALSE,      -- paper until explicitly promoted
     created_at         TIMESTAMPTZ  NOT NULL DEFAULT now()
 );

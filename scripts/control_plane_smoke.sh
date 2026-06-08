@@ -84,7 +84,13 @@ avail="$(curl -fs "${AUTH[@]}" -H 'Content-Type: application/json' -X POST "$bas
 # accounts-service serializes Decimal (e.g. "2500.00000000"); compare on the integer part.
 [[ "${avail%%.*}" == "2500" ]] && ok "available=$avail (via real AccountsClient)" || die "expected 2500, got $avail"
 
-echo "== 5. live-enable (perm x plan x onboarding all pass) =="
+echo "== 4b. accept risk disclosures (required before live) =="
+dv="$(curl -fs "${AUTH[@]}" "$base/v1/disclosures" | j current_version)"
+curl -fs "${AUTH[@]}" -H 'Content-Type: application/json' -X POST "$base/v1/disclosures/accept" \
+  -d "{\"version\":\"$dv\"}" >/dev/null
+ok "disclosures accepted ($dv)"
+
+echo "== 5. live-enable (perm x plan x onboarding x disclosures x funding) =="
 live="$(curl -fs "${AUTH[@]}" -X POST "$base/v1/trading/live-enable" | j live_enabled)"
 [[ "$live" == "True" ]] && ok "live_enabled=$live" || die "expected True, got $live"
 

@@ -107,6 +107,8 @@ class Tenant(Base):
         _enum_col(SubscriptionStatus), default=SubscriptionStatus.NONE
     )
     stripe_customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # Version of the risk disclosures the tenant has accepted (None = none yet).
+    disclosures_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     live_enabled: Mapped[bool] = mapped_column(default=False)  # paper until explicitly promoted
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
 

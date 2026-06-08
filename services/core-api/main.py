@@ -50,9 +50,11 @@ from db import (
     init_db,
 )
 from models import (
+    AcceptDisclosuresRequest,
     AddMemberRequest,
     AuditEntry,
     DashboardView,
+    DisclosuresView,
     EntitlementsView,
     KycSubmitRequest,
     OnboardingView,
@@ -66,6 +68,10 @@ from shared.tenant import validate_tenant
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("core-api")
+
+# Current risk-disclosures version a tenant must accept before live trading.
+# Bump when the disclosure text changes — tenants must re-accept the new version.
+DISCLOSURES_VERSION = "2026-06-v1"
 
 
 @asynccontextmanager
@@ -412,7 +418,8 @@ def live_enable(
       1. caller has the ENABLE_LIVE_TRADING permission (dependency above),
       2. the tenant's PLAN entitles live trading,
       3. onboarding is TRADING_READY (KYC + regional policy cleared),
-      4. the tenant has FUNDED their account (a positive available balance).
+      4. the current risk DISCLOSURES are accepted,
+      5. the tenant has FUNDED their account (a positive available balance).
     NOTE: live_enabled is the entitlement flag only; actual live execution still
     requires the per-tenant validation gate (Sharpe + paper run) per
     TRADING_ASSUMPTIONS.md. Billing/permission can't bypass that.
@@ -424,6 +431,11 @@ def live_enable(
         raise HTTPException(
             status_code=409,
             detail=f"onboarding is '{tenant.onboarding_status.value}', not trading_ready",
+        )
+    if tenant.disclosures_version != DISCLOSURES_VERSION:
+        raise HTTPException(
+            status_code=412,
+            detail=f"accept the current risk disclosures ({DISCLOSURES_VERSION}) before going live",
         )
     # Funding gate — enforced when the ledger is reachable (skipped if accounts
     # isn't wired, matching the dashboard's optional-client convention).
@@ -537,6 +549,41 @@ def audit_log(
         AuditEntry(actor=r.actor, action=r.action, detail=r.detail, created_at=r.created_at)
         for r in rows
     ]
+
+
+# --- disclosures (risk acknowledgment) ----------------------------------------
+
+@app.get("/v1/disclosures", response_model=DisclosuresView)
+def get_disclosures(
+    identity: Identity = Depends(current_identity),
+    db: Session = Depends(get_session),
+) -> DisclosuresView:
+    tenant = _require_tenant(db, identity)
+    return DisclosuresView(
+        current_version=DISCLOSURES_VERSION,
+        accepted_version=tenant.disclosures_version,
+        accepted=tenant.disclosures_version == DISCLOSURES_VERSION,
+    )
+
+
+@app.post("/v1/disclosures/accept", response_model=DisclosuresView)
+def accept_disclosures(
+    req: AcceptDisclosuresRequest,
+    identity: Identity = Depends(current_identity),
+    db: Session = Depends(get_session),
+) -> DisclosuresView:
+    """Record acceptance of the current risk disclosures. Must match the current
+    version (stale accepts are rejected so the audit trail is meaningful)."""
+    if req.version != DISCLOSURES_VERSION:
+        raise HTTPException(
+            status_code=400,
+            detail=f"stale disclosures version '{req.version}'; current is '{DISCLOSURES_VERSION}'",
+        )
+    tenant = _require_tenant(db, identity)
+    tenant.disclosures_version = req.version
+    _audit(db, tenant.id, identity.uid, "disclosures.accepted", req.version)
+    db.commit()
+    return DisclosuresView(current_version=DISCLOSURES_VERSION, accepted_version=req.version, accepted=True)
 
 
 # --- team management ----------------------------------------------------------
