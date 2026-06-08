@@ -476,6 +476,62 @@ def test_funding_503_when_unconfigured(client, monkeypatch):
     assert r.status_code == 503
 
 
+# --- team management ----------------------------------------------------------
+
+def test_owner_can_add_list_and_remove_members(client):
+    owner = _auth("tm-owner", "owner@x.com")
+    client.post("/v1/sessions", headers=owner)
+
+    r = client.post("/v1/team/members", headers=owner,
+                    json={"member_id": "tm-analyst", "email": "a@x.com", "role": "analyst"})
+    assert r.status_code == 200, r.text
+    ids = {m["user_id"] for m in r.json()}
+    assert ids == {"tm-owner", "tm-analyst"}
+
+    # the invited member, on first sign-in, lands in the SAME tenant
+    owner_tid = client.get("/v1/me", headers=owner).json()["tenant_id"]
+    member_tid = client.post("/v1/sessions", headers=_auth("tm-analyst")).json()["tenant_id"]
+    assert member_tid == owner_tid
+
+    remaining = client.request("DELETE", "/v1/team/members/tm-analyst", headers=owner).json()
+    assert {m["user_id"] for m in remaining} == {"tm-owner"}
+
+
+def test_add_member_rejects_existing_user(client):
+    owner = _auth("tm2-owner", "o2@x.com")
+    client.post("/v1/sessions", headers=owner)
+    client.post("/v1/sessions", headers=_auth("tm2-other", "x@x.com"))  # has own tenant
+    r = client.post("/v1/team/members", headers=owner,
+                    json={"member_id": "tm2-other", "role": "analyst"})
+    assert r.status_code == 409
+
+
+def test_team_requires_manage_team_permission(client):
+    import db as dbmod
+    from db import Role
+    h = _auth("tm3", "t3@x.com")
+    client.post("/v1/sessions", headers=h)
+    session = next(dbmod.get_session())
+    session.query(dbmod.UserRole).filter_by(user_id="tm3").one().role = Role.ANALYST  # lacks MANAGE_TEAM
+    session.commit()
+    session.close()
+    assert client.get("/v1/team", headers=h).status_code == 403
+
+
+def test_cannot_remove_self_or_last_owner(client):
+    owner = _auth("tm4-owner", "o4@x.com")
+    client.post("/v1/sessions", headers=owner)
+    assert client.request("DELETE", "/v1/team/members/tm4-owner", headers=owner).status_code == 400
+
+
+def test_cannot_invite_as_owner(client):
+    owner = _auth("tm5-owner", "o5@x.com")
+    client.post("/v1/sessions", headers=owner)
+    r = client.post("/v1/team/members", headers=owner,
+                    json={"member_id": "tm5-x", "role": "owner"})
+    assert r.status_code == 400
+
+
 def test_eligibility_snapshot_reflects_onboarding_and_plan():
     import eligibility
     from db import Market, OnboardingStatus, PlanTier, Tenant

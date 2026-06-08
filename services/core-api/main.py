@@ -50,6 +50,7 @@ from db import (
     init_db,
 )
 from models import (
+    AddMemberRequest,
     AuditEntry,
     DashboardView,
     EntitlementsView,
@@ -58,6 +59,7 @@ from models import (
     PermissionsView,
     Profile,
     RegionSelectRequest,
+    TeamMember,
 )
 from rbac import Permission, effective_permissions
 from shared.tenant import validate_tenant
@@ -535,3 +537,74 @@ def audit_log(
         AuditEntry(actor=r.actor, action=r.action, detail=r.detail, created_at=r.created_at)
         for r in rows
     ]
+
+
+# --- team management ----------------------------------------------------------
+
+def _members(db: Session, tenant_id: str) -> list[TeamMember]:
+    users = db.query(User).filter(User.tenant_id == tenant_id).all()
+    return [
+        TeamMember(
+            user_id=u.id,
+            email=u.email,
+            roles=sorted((r.role for r in u.roles), key=lambda r: r.value),
+        )
+        for u in users
+    ]
+
+
+@app.get("/v1/team", response_model=list[TeamMember])
+def list_team(
+    user: User = Depends(require_permission(Permission.MANAGE_TEAM)),
+    db: Session = Depends(get_session),
+) -> list[TeamMember]:
+    """Members of the caller's tenant. Requires MANAGE_TEAM (owner/admin)."""
+    return _members(db, user.tenant_id)
+
+
+@app.post("/v1/team/members", response_model=list[TeamMember])
+def add_member(
+    req: AddMemberRequest,
+    user: User = Depends(require_permission(Permission.MANAGE_TEAM)),
+    db: Session = Depends(get_session),
+) -> list[TeamMember]:
+    """Invite a member into the caller's tenant with a role. v1 constraint: the
+    member must not already belong to a tenant (one tenant per user)."""
+    if req.role is Role.OWNER:
+        raise HTTPException(status_code=400, detail="cannot assign OWNER to an invited member")
+    existing = _load_user(db, req.member_id)
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="user already belongs to a tenant")
+    member = User(id=req.member_id, email=req.email, tenant_id=user.tenant_id)
+    member.roles.append(UserRole(user_id=req.member_id, role=req.role))
+    db.add(member)
+    _audit(db, user.tenant_id, user.id, "team.member_added", f"{req.member_id} as {req.role.value}")
+    db.commit()
+    return _members(db, user.tenant_id)
+
+
+@app.delete("/v1/team/members/{member_id}", response_model=list[TeamMember])
+def remove_member(
+    member_id: str,
+    user: User = Depends(require_permission(Permission.MANAGE_TEAM)),
+    db: Session = Depends(get_session),
+) -> list[TeamMember]:
+    """Remove a member from the caller's tenant. Cannot remove yourself or the
+    last owner (a tenant always keeps an owner)."""
+    if member_id == user.id:
+        raise HTTPException(status_code=400, detail="cannot remove yourself")
+    member = _load_user(db, member_id)
+    if member is None or member.tenant_id != user.tenant_id:
+        raise HTTPException(status_code=404, detail="member not found in this tenant")
+    member_roles = {r.role for r in member.roles}
+    if Role.OWNER in member_roles:
+        owners = sum(
+            1 for u in db.query(User).filter(User.tenant_id == user.tenant_id).all()
+            if any(r.role is Role.OWNER for r in u.roles)
+        )
+        if owners <= 1:
+            raise HTTPException(status_code=400, detail="cannot remove the last owner")
+    db.delete(member)
+    _audit(db, user.tenant_id, user.id, "team.member_removed", member_id)
+    db.commit()
+    return _members(db, user.tenant_id)

@@ -60,6 +60,18 @@ class AuditEntry(BaseModel):
     created_at: datetime
 
 
+class TeamMember(BaseModel):
+    user_id: str
+    email: str | None
+    roles: list[Role]
+
+
+class AddMemberRequest(BaseModel):
+    member_id: str          # stable user id (Clerk uid / local uid)
+    email: str | None = None
+    role: Role = Role.ANALYST
+
+
 class DashboardView(BaseModel):
     """Aggregated per-tenant view for the frontend dashboard."""
 
