@@ -45,6 +45,12 @@ export interface Balance {
   reserved: number;
 }
 
+export interface TeamMember {
+  user_id: string;
+  email: string | null;
+  roles: string[];
+}
+
 export interface DashboardView {
   profile: Profile;
   entitlements: Entitlements;
@@ -101,6 +107,14 @@ export const api = {
       body: JSON.stringify({ asset, amount }),
     }),
   liveEnable: () => req<Profile>("/v1/trading/live-enable", { method: "POST" }),
+  team: () => req<TeamMember[]>("/v1/team"),
+  addMember: (member_id: string, email: string, role: string) =>
+    req<TeamMember[]>("/v1/team/members", {
+      method: "POST",
+      body: JSON.stringify({ member_id, email, role }),
+    }),
+  removeMember: (id: string) =>
+    req<TeamMember[]>(`/v1/team/members/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };
 
 export { ApiError };

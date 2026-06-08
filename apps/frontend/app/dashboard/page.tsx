@@ -57,9 +57,12 @@ export default function Dashboard() {
       <div className="panel">
         <div className="row" style={{ justifyContent: "space-between" }}>
           <h1>Dashboard</h1>
-          <button className="secondary" onClick={() => { signOut(); router.push("/"); }}>
-            Sign out
-          </button>
+          <div className="row">
+            <a className="muted" href="/team">Team</a>
+            <button className="secondary" onClick={() => { signOut(); router.push("/"); }}>
+              Sign out
+            </button>
+          </div>
         </div>
         <p className="muted">
           {profile.email} · tenant {profile.tenant_id} · {profile.market ?? "—"}/
