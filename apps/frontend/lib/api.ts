@@ -112,6 +112,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ asset, amount }),
     }),
+  withdraw: (asset: string, amount: string) =>
+    req<unknown>("/v1/funding/withdraw", {
+      method: "POST",
+      body: JSON.stringify({ asset, amount }),
+    }),
   liveEnable: () => req<Profile>("/v1/trading/live-enable", { method: "POST" }),
   disclosures: () => req<DisclosuresView>("/v1/disclosures"),
   acceptDisclosures: (version: string) =>

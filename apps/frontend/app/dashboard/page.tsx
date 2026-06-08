@@ -66,6 +66,17 @@ export default function Dashboard() {
     }
   }
 
+  async function withdraw() {
+    setErr("");
+    try {
+      await api.withdraw("USD", amount);
+      await refresh();
+    } catch (e) {
+      // 402 = insufficient funds; 403 = caller lacks request_withdrawal (owner-only).
+      setErr(e instanceof ApiError ? e.message : String(e));
+    }
+  }
+
   return (
     <div>
       <div className="panel">
@@ -143,7 +154,8 @@ export default function Dashboard() {
         )}
         <div className="row" style={{ marginTop: 10 }}>
           <input value={amount} onChange={(e) => setAmount(e.target.value)} />
-          <button onClick={deposit}>Deposit USD (paper)</button>
+          <button onClick={deposit}>Deposit USD</button>
+          <button className="secondary" onClick={withdraw}>Withdraw USD</button>
         </div>
       </div>
     </div>
