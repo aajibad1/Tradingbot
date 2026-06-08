@@ -266,7 +266,23 @@ def test_live_enable_blocked_until_trading_ready(client):
 
 
 def test_live_enable_succeeds_when_all_gates_pass(client):
+    # no accounts override → funding gate is skipped (ledger not reachable)
     h = _ready_pro(client, "le-3")
+    r = client.post("/v1/trading/live-enable", headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["live_enabled"] is True
+
+
+def test_live_enable_blocked_without_funds(client, accounts):
+    # accounts reachable but zero balance → 402 (must fund first)
+    h = _ready_pro(client, "le-4")
+    r = client.post("/v1/trading/live-enable", headers=h)
+    assert r.status_code == 402
+
+
+def test_live_enable_succeeds_after_funding(client, accounts):
+    h = _ready_pro(client, "le-5")
+    client.post("/v1/funding/deposit", headers=h, json={"asset": "USD", "amount": "1000"})
     r = client.post("/v1/trading/live-enable", headers=h)
     assert r.status_code == 200, r.text
     assert r.json()["live_enabled"] is True

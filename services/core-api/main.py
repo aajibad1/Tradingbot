@@ -385,15 +385,32 @@ def permissions(
     return PermissionsView(roles=roles, permissions=perms)
 
 
+def get_accounts_client() -> AccountsClient:
+    """FastAPI dependency — the accounts-service client. Tests override this."""
+    url = os.environ.get("ACCOUNTS_SERVICE_URL")
+    if not url:
+        raise HTTPException(status_code=503, detail="funding not configured (ACCOUNTS_SERVICE_URL unset)")
+    return AccountsClient(url)
+
+
+def get_accounts_client_optional() -> AccountsClient | None:
+    """Like get_accounts_client but returns None when unconfigured — so the
+    dashboard / funding gate degrade gracefully before accounts-service is wired."""
+    url = os.environ.get("ACCOUNTS_SERVICE_URL")
+    return AccountsClient(url) if url else None
+
+
 @app.post("/v1/trading/live-enable", response_model=Profile)
 def live_enable(
     user: User = Depends(require_permission(Permission.ENABLE_LIVE_TRADING)),
     db: Session = Depends(get_session),
+    ac: AccountsClient | None = Depends(get_accounts_client_optional),
 ) -> Profile:
     """Flip a tenant from paper to live-eligible — only when ALL gates pass:
       1. caller has the ENABLE_LIVE_TRADING permission (dependency above),
       2. the tenant's PLAN entitles live trading,
-      3. onboarding is TRADING_READY (KYC + regional policy cleared).
+      3. onboarding is TRADING_READY (KYC + regional policy cleared),
+      4. the tenant has FUNDED their account (a positive available balance).
     NOTE: live_enabled is the entitlement flag only; actual live execution still
     requires the per-tenant validation gate (Sharpe + paper run) per
     TRADING_ASSUMPTIONS.md. Billing/permission can't bypass that.
@@ -406,6 +423,10 @@ def live_enable(
             status_code=409,
             detail=f"onboarding is '{tenant.onboarding_status.value}', not trading_ready",
         )
+    # Funding gate — enforced when the ledger is reachable (skipped if accounts
+    # isn't wired, matching the dashboard's optional-client convention).
+    if ac is not None and not any(float(b.get("available", 0)) > 0 for b in ac.all_balances(tenant.id)):
+        raise HTTPException(status_code=402, detail="fund your account before enabling live trading")
     tenant.live_enabled = True
     _audit(db, tenant.id, user.id, "live.enabled", f"plan={tenant.plan.value}")
     db.commit()
@@ -419,21 +440,6 @@ def live_enable(
 class FundingRequest(BaseModel):
     asset: str
     amount: Decimal
-
-
-def get_accounts_client() -> AccountsClient:
-    """FastAPI dependency — the accounts-service client. Tests override this."""
-    url = os.environ.get("ACCOUNTS_SERVICE_URL")
-    if not url:
-        raise HTTPException(status_code=503, detail="funding not configured (ACCOUNTS_SERVICE_URL unset)")
-    return AccountsClient(url)
-
-
-def get_accounts_client_optional() -> AccountsClient | None:
-    """Like get_accounts_client but returns None when unconfigured — so the
-    dashboard still renders (with empty balances) before funding is wired."""
-    url = os.environ.get("ACCOUNTS_SERVICE_URL")
-    return AccountsClient(url) if url else None
 
 
 @app.get("/v1/funding/balances")
