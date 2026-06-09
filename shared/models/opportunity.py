@@ -39,6 +39,9 @@ class Opportunity(BaseModel):
     detected_at: datetime
     execute: bool = Field(default=False, description="Only True after risk-engine approval")
     rejection_reason: str | None = None
+    # For DIRECTIONAL strategy only: 'long' or 'short' (the single perp leg's side).
+    # None for market-neutral strategies (both legs implied by long/short exchange).
+    direction: str | None = None
 
     # Reference prices at detection, carried so the execution simulator prices
     # fills off the REAL market instead of a hardcoded placeholder. Optional for
