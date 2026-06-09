@@ -101,6 +101,7 @@ jobs:
           - accounts-service
           - corridor-engine
           - opportunity-ranker
+          - signal-engine
           - account-link-service
     steps:
       - uses: actions/checkout@v4
@@ -143,6 +144,7 @@ jobs:
           - accounts-service
           - corridor-engine
           - opportunity-ranker
+          - signal-engine
           - account-link-service
     services:
       redis:
@@ -247,6 +249,7 @@ jobs:
           - accounts-service
           - corridor-engine
           - opportunity-ranker
+          - signal-engine
           - account-link-service
     steps:
       - uses: actions/checkout@v4
