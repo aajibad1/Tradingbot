@@ -1,5 +1,6 @@
 import "./globals.css";
 import type { Metadata } from "next";
+import StatusBanner from "./StatusBanner";
 
 export const metadata: Metadata = {
   title: "TraditBot — Arbitrage SaaS",
@@ -15,6 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <strong>TraditBot</strong>
             <a className="muted" href="/dashboard">Dashboard</a>
           </div>
+          <StatusBanner />
           {children}
         </div>
       </body>
