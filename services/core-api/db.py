@@ -174,6 +174,25 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
 
 
+class NoteKind(str, Enum):
+    NOTE = "note"                       # ops/support annotation
+    COMPLIANCE_FLAG = "compliance_flag"  # compliance concern raised on a tenant
+
+
+class SupportNote(Base):
+    """Ops/compliance annotations on a tenant (the brief's support_notes +
+    compliance_flags). Append-only; readable behind VIEW_AUDIT_LOG."""
+
+    __tablename__ = "support_notes"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    author: Mapped[str] = mapped_column(String(128))
+    kind: Mapped[NoteKind] = mapped_column(_enum_col(NoteKind), default=NoteKind.NOTE)
+    body: Mapped[str] = mapped_column(String(2000))
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+
+
 class KycReview(Base):
     """Append-only KYC decision record — the auditable trail behind a tenant's
     kyc_status flag (who/what/when/result). Required for the regulated custody

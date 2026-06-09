@@ -28,6 +28,16 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant ON audit_logs(tenant_id);
 
+CREATE TABLE IF NOT EXISTS support_notes (
+    id          BIGSERIAL    PRIMARY KEY,
+    tenant_id   VARCHAR(64)  NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    author      VARCHAR(128) NOT NULL,
+    kind        VARCHAR(24)  NOT NULL DEFAULT 'note',     -- note|compliance_flag
+    body        VARCHAR(2000) NOT NULL,
+    created_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_support_notes_tenant ON support_notes(tenant_id);
+
 CREATE TABLE IF NOT EXISTS kyc_reviews (
     id            BIGSERIAL    PRIMARY KEY,
     tenant_id     VARCHAR(64)  NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,

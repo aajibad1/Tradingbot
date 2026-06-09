@@ -41,6 +41,7 @@ from db import (
     KycReview,
     KycStatus,
     OnboardingEvent,
+    SupportNote,
     OnboardingStatus,
     Role,
     Tenant,
@@ -53,9 +54,11 @@ from db import (
 from models import (
     AcceptDisclosuresRequest,
     AddMemberRequest,
+    AddNoteRequest,
     AuditEntry,
     ChangeRoleRequest,
     KycReviewEntry,
+    SupportNoteEntry,
     DashboardView,
     DisclosuresView,
     EntitlementsView,
@@ -555,6 +558,39 @@ def audit_log(
         AuditEntry(actor=r.actor, action=r.action, detail=r.detail, created_at=r.created_at)
         for r in rows
     ]
+
+
+@app.get("/v1/support/notes", response_model=list[SupportNoteEntry])
+def list_support_notes(
+    user: User = Depends(require_permission(Permission.VIEW_AUDIT_LOG)),
+    db: Session = Depends(get_session),
+) -> list[SupportNoteEntry]:
+    """Ops/compliance notes on the tenant, newest first. Requires VIEW_AUDIT_LOG."""
+    rows = (
+        db.query(SupportNote)
+        .filter(SupportNote.tenant_id == user.tenant_id)
+        .order_by(SupportNote.id.desc())
+        .all()
+    )
+    return [
+        SupportNoteEntry(author=r.author, kind=r.kind, body=r.body, created_at=r.created_at)
+        for r in rows
+    ]
+
+
+@app.post("/v1/support/notes", response_model=list[SupportNoteEntry])
+def add_support_note(
+    req: AddNoteRequest,
+    user: User = Depends(require_permission(Permission.VIEW_AUDIT_LOG)),
+    db: Session = Depends(get_session),
+) -> list[SupportNoteEntry]:
+    """Attach an ops note or compliance flag to the tenant."""
+    if not req.body.strip():
+        raise HTTPException(status_code=400, detail="note body required")
+    db.add(SupportNote(tenant_id=user.tenant_id, author=user.id, kind=req.kind, body=req.body.strip()))
+    _audit(db, user.tenant_id, user.id, f"support.{req.kind.value}", req.body.strip()[:120])
+    db.commit()
+    return list_support_notes(user, db)
 
 
 @app.get("/v1/kyc/reviews", response_model=list[KycReviewEntry])

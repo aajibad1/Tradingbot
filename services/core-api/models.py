@@ -6,7 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from db import KycStatus, Market, OnboardingStatus, PlanTier, Role, SubscriptionStatus
+from db import KycStatus, Market, NoteKind, OnboardingStatus, PlanTier, Role, SubscriptionStatus
 
 
 class Profile(BaseModel):
@@ -57,6 +57,18 @@ class AuditEntry(BaseModel):
     actor: str
     action: str
     detail: str
+    created_at: datetime
+
+
+class AddNoteRequest(BaseModel):
+    body: str
+    kind: NoteKind = NoteKind.NOTE
+
+
+class SupportNoteEntry(BaseModel):
+    author: str
+    kind: NoteKind
+    body: str
     created_at: datetime
 
 

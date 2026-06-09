@@ -276,6 +276,35 @@ def test_live_enable_succeeds_when_all_gates_pass(client):
     assert r.json()["live_enabled"] is True
 
 
+def test_support_notes_add_and_list(client):
+    h = _auth("sn-1", "s1@x.com")
+    client.post("/v1/sessions", headers=h)
+    client.post("/v1/support/notes", headers=h, json={"body": "called to verify ID", "kind": "note"})
+    out = client.post("/v1/support/notes", headers=h,
+                      json={"body": "watchlist hit", "kind": "compliance_flag"}).json()
+    assert out[0]["kind"] == "compliance_flag"   # newest first
+    assert out[0]["body"] == "watchlist hit"
+    assert {n["kind"] for n in out} == {"note", "compliance_flag"}
+
+
+def test_support_notes_require_permission(client):
+    import db as dbmod
+    from db import Role
+    h = _auth("sn-2", "s2@x.com")
+    client.post("/v1/sessions", headers=h)
+    session = next(dbmod.get_session())
+    session.query(dbmod.UserRole).filter_by(user_id="sn-2").one().role = Role.OPERATOR  # no VIEW_AUDIT_LOG
+    session.commit()
+    session.close()
+    assert client.get("/v1/support/notes", headers=h).status_code == 403
+
+
+def test_support_note_empty_body_rejected(client):
+    h = _auth("sn-3", "s3@x.com")
+    client.post("/v1/sessions", headers=h)
+    assert client.post("/v1/support/notes", headers=h, json={"body": "  "}).status_code == 400
+
+
 def test_kyc_submit_creates_review_record(client):
     h = _auth("kyc-1", "k1@x.com")
     client.post("/v1/sessions", headers=h)
