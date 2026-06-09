@@ -84,6 +84,11 @@ avail="$(curl -fs "${AUTH[@]}" -H 'Content-Type: application/json' -X POST "$bas
 # accounts-service serializes Decimal (e.g. "2500.00000000"); compare on the integer part.
 [[ "${avail%%.*}" == "2500" ]] && ok "available=$avail (via real AccountsClient)" || die "expected 2500, got $avail"
 
+echo "== 4a. withdraw \$1000 (owner-only) -> balance 1500 =="
+wbal="$(curl -fs "${AUTH[@]}" -H 'Content-Type: application/json' -X POST "$base/v1/funding/withdraw" \
+  -d '{"asset":"USD","amount":"1000"}' | j available)"
+[[ "${wbal%%.*}" == "1500" ]] && ok "available=$wbal after withdraw" || die "expected 1500, got $wbal"
+
 echo "== 4b. accept risk disclosures (required before live) =="
 dv="$(curl -fs "${AUTH[@]}" "$base/v1/disclosures" | j current_version)"
 curl -fs "${AUTH[@]}" -H 'Content-Type: application/json' -X POST "$base/v1/disclosures/accept" \
@@ -100,7 +105,7 @@ echo "$dash" | python3 -c '
 import sys,json; d=json.load(sys.stdin)
 usd=[b for b in d["balances"] if b["asset"]=="USD"]
 assert d["entitlements"]["live_trading"] is True, d
-assert usd and usd[0]["available"]==2500.0, d
+assert usd and usd[0]["available"]==1500.0, d   # 2500 deposited - 1000 withdrawn
 print("  dashboard: plan=%s live=%s USD=%s" % (d["entitlements"]["plan"], d["profile"]["live_enabled"], usd[0]["available"]))
 '
 ok "dashboard verified"
