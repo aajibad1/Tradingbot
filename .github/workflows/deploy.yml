@@ -59,6 +59,7 @@ jobs:
           - status-service
           - regime-classifier
           - movement-feature-builder
+          - venue-anomaly-detector
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
     steps:

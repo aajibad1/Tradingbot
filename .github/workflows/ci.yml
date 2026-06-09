@@ -107,6 +107,7 @@ jobs:
           - status-service
           - regime-classifier
           - movement-feature-builder
+          - venue-anomaly-detector
           - account-link-service
     steps:
       - uses: actions/checkout@v4
@@ -155,6 +156,7 @@ jobs:
           - status-service
           - regime-classifier
           - movement-feature-builder
+          - venue-anomaly-detector
           - account-link-service
     services:
       redis:
@@ -265,6 +267,7 @@ jobs:
           - status-service
           - regime-classifier
           - movement-feature-builder
+          - venue-anomaly-detector
           - account-link-service
     steps:
       - uses: actions/checkout@v4
