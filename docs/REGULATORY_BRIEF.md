@@ -64,6 +64,35 @@ chosen model (see `docs/PLATFORM_ARCHITECTURE.md`):
 6. Is there a **launch sequence** (e.g. one jurisdiction, segregated model,
    non-discretionary first) that materially lowers the initial licensing burden?
 
+## Derivatives / futures exposure (please assess)
+
+The strategies use **perpetual futures** (perps) as a market-neutral leg: funding
+carry = long spot + **short perp** at 1× isolated margin, fully hedged — we are
+harvesting funding, not making a levered directional bet. Separately, the system
+supports an optional, **budget-capped directional sleeve** (small net directional
+exposure for the hybrid model) and a dormant quarterly-futures basis strategy.
+
+Questions for counsel:
+1. Does **market-neutral perp usage** (1×, hedged, on the platform's own accounts)
+   carry different derivatives licensing than **levered directional futures**?
+2. Crypto **derivatives for end users** are restricted/banned for retail in several
+   target jurisdictions (US retail; parts of Africa). Under managed custody, what
+   can we offer, to whom, and what licensing does directional/levered futures
+   exposure trigger beyond spot?
+3. Should the **directional sleeve be off by default per region** (it already is
+   globally — `max_directional_exposure_pct = 0.0`) pending per-jurisdiction
+   clearance?
+
+## AI / automated decision-making (governance)
+
+AI (Perplexity for cited market research, Claude for reasoning, multi-agent
+debate, an advisory ranker) is used **only in an advisory plane** — it ranks,
+researches, and explains. The **deterministic risk engine is the sole final
+authority**; AI never sends trades or bypasses hard controls, and every AI output
+is persisted with its **sources/citations + model version** for audit. Questions:
+do any jurisdictions require disclosure of automated/algorithmic decision-making
+to customers, and are there suitability/robo-advisory rules we must meet?
+
 ## What we will NOT do before clearance
 
 - Hold or move **real customer money** (everything runs in **paper mode** with an
