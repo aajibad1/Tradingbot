@@ -61,6 +61,7 @@ jobs:
           - movement-feature-builder
           - venue-anomaly-detector
           - route-optimizer
+          - signal-replay-service
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
     steps:

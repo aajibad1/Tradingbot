@@ -109,6 +109,7 @@ jobs:
           - movement-feature-builder
           - venue-anomaly-detector
           - route-optimizer
+          - signal-replay-service
           - account-link-service
     steps:
       - uses: actions/checkout@v4
@@ -159,6 +160,7 @@ jobs:
           - movement-feature-builder
           - venue-anomaly-detector
           - route-optimizer
+          - signal-replay-service
           - account-link-service
     services:
       redis:
@@ -271,6 +273,7 @@ jobs:
           - movement-feature-builder
           - venue-anomaly-detector
           - route-optimizer
+          - signal-replay-service
           - account-link-service
     steps:
       - uses: actions/checkout@v4
