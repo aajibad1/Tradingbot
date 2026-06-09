@@ -21,12 +21,21 @@ def test_baseline_for_blocked_country():
 def test_research_result_is_used_and_clamped():
     def fake_research(corridor):
         return {"reliability": 1.5, "friction_bps": 22.0, "regulatory_risk": "LOW",
-                "summary": "stable corridor"}
+                "summary": "stable corridor",
+                "citations": ["https://example.com/policy"], "model_version": "sonar-pro"}
     intel = assess_corridor("NGN->ZAR", research=fake_research)
     assert intel.source == "perplexity"
     assert intel.reliability_score == 1.0          # clamped
     assert intel.regulatory_risk == "low"
     assert intel.settlement_friction_bps == 22.0
+    # grounding/audit: citations + model carried through
+    assert intel.sources == ["https://example.com/policy"]
+    assert intel.model_version == "sonar-pro"
+
+
+def test_baseline_has_no_sources_or_model():
+    intel = assess_corridor("NGN->ZAR")
+    assert intel.sources == [] and intel.model_version is None
 
 
 def test_research_none_falls_back_to_baseline():

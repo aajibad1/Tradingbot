@@ -11,7 +11,7 @@ this stays testable, and there's a deterministic baseline when no key is set
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 # Source currency → ISO country (drives the baseline + research context).
 _CCY_COUNTRY = {"NGN": "NG", "ZAR": "ZA", "KES": "KE", "GHS": "GH", "USD": ""}
@@ -37,6 +37,9 @@ class CorridorIntel:
     regulatory_risk: str              # low | medium | high
     summary: str
     source: str                       # 'perplexity' | 'baseline'
+    # Grounding/audit trail: cited sources + the model that produced this.
+    sources: list[str] = field(default_factory=list)
+    model_version: str | None = None
 
 
 def _baseline(corridor: str) -> CorridorIntel:
@@ -66,4 +69,6 @@ def assess_corridor(corridor: str, research=None) -> CorridorIntel:
         regulatory_risk=reg if reg in _RISK else "high",
         summary=str(raw.get("summary", ""))[:600],
         source="perplexity",
+        sources=list(raw.get("citations", []) or []),
+        model_version=raw.get("model_version"),
     )

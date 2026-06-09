@@ -58,8 +58,13 @@ def assess(corridor: str, timeout: float = 20.0) -> dict | None:
             timeout=timeout,
         )
         resp.raise_for_status()
-        content = resp.json()["choices"][0]["message"]["content"]
-        return _extract_json(content)
+        body = resp.json()
+        parsed = _extract_json(body["choices"][0]["message"]["content"])
+        # Grounding/audit: Perplexity returns the cited sources used. Carry them
+        # (+ the model) so every assessment is traceable, per finance guidance.
+        parsed["citations"] = body.get("citations", []) or []
+        parsed["model_version"] = body.get("model", _MODEL)
+        return parsed
     except Exception as e:
         logger.warning("perplexity corridor research failed for %s: %s", corridor, e)
         return None
