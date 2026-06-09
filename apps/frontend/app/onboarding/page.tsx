@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, OnboardingView, ApiError } from "@/lib/api";
+import { api, OnboardingView, DisclosuresView, ApiError } from "@/lib/api";
 import { isSignedIn } from "@/lib/auth";
 
 const COUNTRIES: Record<string, string[]> = {
@@ -12,6 +12,7 @@ const COUNTRIES: Record<string, string[]> = {
 export default function Onboarding() {
   const router = useRouter();
   const [view, setView] = useState<OnboardingView | null>(null);
+  const [disc, setDisc] = useState<DisclosuresView | null>(null);
   const [market, setMarket] = useState<"africa" | "global">("africa");
   const [country, setCountry] = useState("NG");
   const [fullName, setFullName] = useState("");
@@ -21,10 +22,21 @@ export default function Onboarding() {
   async function refresh() {
     try {
       await api.createSession(); // idempotent: ensures the tenant exists
-      setView(await api.onboarding());
+      const [v, d] = await Promise.all([api.onboarding(), api.disclosures()]);
+      setView(v);
+      setDisc(d);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : String(e));
     }
+  }
+
+  async function acceptDisclosures() {
+    if (!disc) return;
+    await run(async () => {
+      await api.acceptDisclosures(disc.current_version);
+      setDisc(await api.disclosures());
+      return api.onboarding();
+    });
   }
 
   useEffect(() => {
@@ -107,10 +119,21 @@ export default function Onboarding() {
 
       {status === "identity_verified" && (
         <div>
-          <h3>3 · Submit for review</h3>
-          <button disabled={busy} onClick={() => run(() => api.submitOnboarding())}>
-            Run regional policy check
-          </button>
+          <h3>3 · Risk disclosures</h3>
+          {disc && !disc.accepted ? (
+            <div className="row">
+              <span className="muted">Acknowledge the risk disclosures ({disc.current_version}) to continue.</span>
+              <button disabled={busy} onClick={acceptDisclosures}>Accept disclosures</button>
+            </div>
+          ) : (
+            <>
+              <p className="muted">✓ Risk disclosures accepted.</p>
+              <h3>4 · Submit for review</h3>
+              <button disabled={busy} onClick={() => run(() => api.submitOnboarding())}>
+                Run regional policy check
+              </button>
+            </>
+          )}
         </div>
       )}
 
