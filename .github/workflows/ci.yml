@@ -104,6 +104,7 @@ jobs:
           - signal-engine
           - corridor-intelligence-service
           - debate-service
+          - status-service
           - account-link-service
     steps:
       - uses: actions/checkout@v4
@@ -149,6 +150,7 @@ jobs:
           - signal-engine
           - corridor-intelligence-service
           - debate-service
+          - status-service
           - account-link-service
     services:
       redis:
@@ -256,6 +258,7 @@ jobs:
           - signal-engine
           - corridor-intelligence-service
           - debate-service
+          - status-service
           - account-link-service
     steps:
       - uses: actions/checkout@v4
