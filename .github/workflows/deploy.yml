@@ -57,6 +57,7 @@ jobs:
           - corridor-intelligence-service
           - debate-service
           - status-service
+          - regime-classifier
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
     steps:

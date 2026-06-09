@@ -105,6 +105,7 @@ jobs:
           - corridor-intelligence-service
           - debate-service
           - status-service
+          - regime-classifier
           - account-link-service
     steps:
       - uses: actions/checkout@v4
@@ -151,6 +152,7 @@ jobs:
           - corridor-intelligence-service
           - debate-service
           - status-service
+          - regime-classifier
           - account-link-service
     services:
       redis:
@@ -259,6 +261,7 @@ jobs:
           - corridor-intelligence-service
           - debate-service
           - status-service
+          - regime-classifier
           - account-link-service
     steps:
       - uses: actions/checkout@v4
