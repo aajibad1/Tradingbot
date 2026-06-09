@@ -115,3 +115,13 @@ def test_hyperliquid_eth_perp():
     assert tick is not None
     assert tick.symbol == "ETH/USD:PERP"
     assert tick.asset == "ETH"
+
+
+def test_collector_conforms_to_market_data_adapter():
+    from collectors.kraken import KrakenCollector
+    from collectors.base import CollectorConfig
+    from shared.connectors import MarketDataAdapter
+    c = KrakenCollector(CollectorConfig(exchange="kraken", symbols=["BTC/USD"]))
+    assert isinstance(c, MarketDataAdapter)
+    assert c.venue == "kraken" and c.region == "global" and c.market_type == "cex"
+    assert c.health().venue == "kraken"

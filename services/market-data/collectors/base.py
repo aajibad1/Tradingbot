@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from shared.connectors import VenueHealth
 from shared.models.exchange_tick import ExchangeTick
 from shared.pubsub.publisher import Topic, get_publisher
 from shared.utils.exchange_normalizer import normalize_symbol
@@ -44,14 +45,23 @@ class CollectorConfig:
     exchange: str
     symbols: list[str]
     instrument_type: str = "spot"  # 'spot' or 'perp'
+    region: str = "global"         # shared.connectors region tag
+    market_type: str = "cex"       # shared.connectors market-type tag
 
 
 class BaseCollector:
+    """A CCXT-Pro MarketDataAdapter (see shared.connectors.adapter). Native /
+    on-chain / Africa-rail collectors implement the same contract."""
+
     name: str
 
     def __init__(self, config: CollectorConfig, redis: Redis | None = None) -> None:
         self.config = config
         self.redis = redis
+        # MarketDataAdapter contract attributes.
+        self.venue = config.exchange
+        self.region = config.region
+        self.market_type = config.market_type
         self.publisher = get_publisher()
         self._stopping = asyncio.Event()
         self._last_message_at: float = 0.0
@@ -61,6 +71,11 @@ class BaseCollector:
     def is_healthy(self) -> bool:
         # No message for 60s = stale connection.
         return (time.time() - self._last_message_at) < 60.0
+
+    def health(self) -> VenueHealth:
+        """MarketDataAdapter contract: structured health for the venue."""
+        return VenueHealth(venue=self.venue, healthy=self.is_healthy(),
+                           latency_ms=self._last_latency_ms or None)
 
     async def stop(self) -> None:
         self._stopping.set()
