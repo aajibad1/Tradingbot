@@ -58,6 +58,7 @@ jobs:
           - debate-service
           - status-service
           - regime-classifier
+          - movement-feature-builder
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
     steps:

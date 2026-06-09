@@ -41,7 +41,7 @@ ALL_SERVICES=(
   market-data funding-rate-service opportunity-engine risk-engine
   paper-trader trade-ledger ai-ops-agent execution-orchestrator
   sentiment-service dashboard-api notification-dispatcher fx-rate-service
-  core-api accounts-service account-link-service corridor-engine opportunity-ranker signal-engine corridor-intelligence-service debate-service status-service regime-classifier
+  core-api accounts-service account-link-service corridor-engine opportunity-ranker signal-engine corridor-intelligence-service debate-service status-service regime-classifier movement-feature-builder
 )
 
 # ── flags ─────────────────────────────────────────────────────────────────────
