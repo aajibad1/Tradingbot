@@ -57,6 +57,7 @@ from rules.kill_switch import (
     trigger_kill_switch as kill_switch_trigger,
 )
 from rules.liquidation_monitor import check_liquidations, scan as scan_liquidations
+from rules.directional_budget import check_directional_budget
 from rules.eligibility_gate import check_eligibility
 from rules.position_limits import check_position_limits
 from rules.sentiment_gate import check_sentiment
@@ -318,6 +319,9 @@ def evaluate(req: EvaluateRequest) -> EvaluateResponse:
     # Stage 2: position limits (size, exchange/asset exposure, leverage, min edge).
     violations = []
     violations.extend(check_position_limits(req.opportunity, state, DEFAULT_LIMITS))
+
+    # Stage 2.5: hybrid directional-sleeve budget (neutral opps pass through).
+    violations.extend(check_directional_budget(req.opportunity, state, DEFAULT_LIMITS))
 
     # Stage 3: drawdown — a breach trips the tenant's kill switch synchronously,
     # so downstream callers see kill_switch_active=True on the very next call.

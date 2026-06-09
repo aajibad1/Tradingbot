@@ -14,6 +14,7 @@ class RiskRule(str, Enum):
     API_LATENCY = "api_latency"
     KILL_SWITCH = "kill_switch"
     TENANT_NOT_ELIGIBLE = "tenant_not_eligible"
+    DIRECTIONAL_BUDGET = "directional_budget"
 
 
 class RiskViolation(BaseModel):
@@ -39,6 +40,9 @@ class RiskState(BaseModel):
     open_position_count: int = 0
     exchange_exposure_pct: dict[str, float] = Field(default_factory=dict)
     asset_concentration_pct: dict[str, float] = Field(default_factory=dict)
+    # Net directional exposure (% of capital) held by the hybrid satellite sleeve.
+    # The neutral core does not contribute to this.
+    directional_exposure_pct: float = 0.0
     leverage_multiplier: float = 1.0
     kill_switch: KillSwitchState = Field(default_factory=KillSwitchState)
     last_updated: datetime

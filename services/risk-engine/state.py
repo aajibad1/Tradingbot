@@ -39,6 +39,7 @@ _SUF_DAILY_PNL = "daily_pnl_usd"
 _SUF_CAPITAL = "capital_usd"
 _SUF_OPEN_POSITIONS = "open_positions"
 _SUF_LEVERAGE = "leverage_multiplier"
+_SUF_DIRECTIONAL = "directional_exposure_pct"  # hybrid satellite sleeve net exposure
 _SUF_LAST_UPDATED = "last_updated"
 _PFX_EXPOSURE = "exposure:"
 _PFX_CONCENTRATION = "concentration:"
@@ -105,6 +106,17 @@ def _scan_prefix(redis: Redis, prefix: str) -> dict[str, float]:
     return out
 
 
+def incr_directional_exposure(redis: Redis, delta_pct: float, tenant_id: str = DEFAULT_TENANT) -> float:
+    """Adjust the tenant's directional-sleeve exposure (% of capital) and return
+    the new total, clamped at >= 0. Sole writer of risk:directional_exposure_pct."""
+    key = risk_key(_SUF_DIRECTIONAL, tenant_id)
+    total = float(redis.incrbyfloat(key, delta_pct))
+    if total < 0:
+        redis.set(key, "0")
+        total = 0.0
+    return total
+
+
 def load_state(redis: Redis, tenant_id: str = DEFAULT_TENANT) -> RiskState:
     cap_key = risk_key(_SUF_CAPITAL, tenant_id)
     capital = float(redis.get(cap_key) or 0.0)
@@ -121,6 +133,7 @@ def load_state(redis: Redis, tenant_id: str = DEFAULT_TENANT) -> RiskState:
         open_position_count=int(redis.get(risk_key(_SUF_OPEN_POSITIONS, tenant_id)) or 0),
         exchange_exposure_pct=_scan_prefix(redis, risk_key(_PFX_EXPOSURE, tenant_id)),
         asset_concentration_pct=_scan_prefix(redis, risk_key(_PFX_CONCENTRATION, tenant_id)),
+        directional_exposure_pct=float(redis.get(risk_key(_SUF_DIRECTIONAL, tenant_id)) or 0.0),
         leverage_multiplier=float(redis.get(risk_key(_SUF_LEVERAGE, tenant_id)) or 1.0),
         kill_switch=load_kill_switch(redis, tenant_id),
         last_updated=datetime.fromisoformat(

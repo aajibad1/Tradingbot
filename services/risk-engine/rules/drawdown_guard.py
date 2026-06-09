@@ -10,6 +10,9 @@ DEFAULT_LIMITS: dict[str, float] = {
     "max_exchange_exposure_pct": 25.0,
     "max_single_asset_exposure_pct": 20.0,
     "max_leverage_multiplier": 1.0,
+    # Hybrid directional sleeve budget (% of capital). 0.0 = pure market-neutral
+    # (directional opportunities are rejected). Raise to enable the satellite.
+    "max_directional_exposure_pct": 0.0,
     # Anchored to the same constant the opportunity-engine uses; never let
     # these two drift. ``min_viable_net_edge_bps()`` in shared/utils picks up
     # Redis-backed dynamic overrides; here we keep the static floor.

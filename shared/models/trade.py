@@ -41,4 +41,7 @@ class Trade(BaseModel):
     opened_at: datetime
     closed_at: datetime | None = None
     funding_collected_usd: float = 0.0
+    # Directional (non-neutral) fill — folds into the risk-engine directional
+    # exposure budget instead of the market-neutral exposure accounting.
+    directional: bool = False
     notes: str = ""

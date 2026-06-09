@@ -67,14 +67,21 @@ def apply_trade(redis: Redis, trade: Trade, tenant_id: str = DEFAULT_TENANT) -> 
         state_module.record_open_position(
             redis, trade.opportunity_id, asset, exposure_pct, concentration_pct, tenant_id
         )
+        if trade.directional:
+            # Satellite sleeve: a directional open adds net exposure to the budget.
+            state_module.incr_directional_exposure(redis, concentration_pct, tenant_id)
         logger.info(
-            "position opened opp=%s exposure_pct=%s concentration_pct=%.3f",
-            trade.opportunity_id, exposure_pct, concentration_pct,
+            "position opened opp=%s exposure_pct=%s concentration_pct=%.3f directional=%s",
+            trade.opportunity_id, exposure_pct, concentration_pct, trade.directional,
         )
         return
 
     # CLOSED or FAILED — unwind any tracked exposure first.
     released = state_module.release_position(redis, trade.opportunity_id, tenant_id)
+    if trade.directional and capital > 0:
+        # Release the directional exposure this position added (clamped >= 0).
+        _, position_notional = _position_notionals(trade)
+        state_module.incr_directional_exposure(redis, -position_notional / capital * 100.0, tenant_id)
 
     if trade.status is TradeStatus.CLOSED:
         new_total = state_module.incr_daily_pnl(redis, trade.net_pnl_usd, tenant_id)

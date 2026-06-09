@@ -11,6 +11,9 @@ class StrategyType(str, Enum):
     SPOT_PERP_BASIS = "spot_perp_basis"
     CROSS_EXCHANGE = "cross_exchange"
     TRIANGULAR = "triangular"
+    # Directional (NOT market-neutral): consumes the risk-engine directional
+    # budget. The hybrid "satellite" sleeve — everything else is the neutral core.
+    DIRECTIONAL = "directional"
 
 
 class Opportunity(BaseModel):
