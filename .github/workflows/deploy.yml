@@ -54,6 +54,7 @@ jobs:
           - corridor-engine
           - opportunity-ranker
           - signal-engine
+          - corridor-intelligence-service
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
     steps:
