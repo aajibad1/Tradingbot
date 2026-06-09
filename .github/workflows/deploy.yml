@@ -60,6 +60,7 @@ jobs:
           - regime-classifier
           - movement-feature-builder
           - venue-anomaly-detector
+          - route-optimizer
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
     steps:
