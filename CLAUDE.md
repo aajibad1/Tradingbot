@@ -23,6 +23,7 @@ services/
   # API plane — partner orchestration (docs/05–06). SANDBOX only; live rails gated on licensing.
   public-api-gateway/      Front door: authenticate (partner-auth) + meter (api-metering) + proxy
   developer-portal/        Self-serve key mgmt + sandbox API playground + catalog (FastAPI-served UI)
+  admin-console/           Ops/compliance oversight UI: health + per-tenant keys/usage/invoices/webhooks
   routing-service/         Resolve best provider/corridor (cost|speed) for a transfer; advisory
   wallet-service/          Per-tenant wallets + aggregated balances; overdraft-protected adjust
   onramp-orchestrator/     Fiat→stablecoin on-ramp (sandbox simulator) → funding-events
@@ -121,6 +122,7 @@ PYTHONPATH=.:services/routing-service      python3 -m pytest services/routing-se
 PYTHONPATH=.:services/wallet-service       python3 -m pytest services/wallet-service/tests/ -v
 PYTHONPATH=.:services/public-api-gateway   python3 -m pytest services/public-api-gateway/tests/ -v
 PYTHONPATH=.:services/developer-portal     python3 -m pytest services/developer-portal/tests/ -v
+PYTHONPATH=.:services/admin-console        python3 -m pytest services/admin-console/tests/ -v
 
 # All services in one run (note PYTHONPATH order)
 PYTHONPATH=.:services/risk-engine:services/paper-trader:services/market-data:services/funding-rate-service \
