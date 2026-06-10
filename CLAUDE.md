@@ -87,6 +87,9 @@ Run the whole thing locally (no GCP): `./scripts/local_stack.sh` boots the wedge
 control plane + analytics together on SQLite/Redis/NullPublisher and stays up for
 interactive testing (status-service at :8087 aggregates the live mesh: `/status`,
 `/slo/catalog`, `/slo/evaluate`). Needs a reachable Redis.
+Run the SANDBOX API plane locally (no GCP/Redis): `./scripts/api_plane_stack.sh`
+boots all 13 API-plane services wired together + the Developer Portal (:8322) and
+Admin Console (:8323), and stays up (`SMOKE=1` to boot-check + exit).
 
 End-to-end local smokes (no GCP):
 `./scripts/control_plane_smoke.sh` (onboarding→billing→funding→live-enable→dashboard),
