@@ -42,6 +42,10 @@ ALL_SERVICES=(
   paper-trader trade-ledger ai-ops-agent execution-orchestrator
   sentiment-service dashboard-api notification-dispatcher fx-rate-service
   core-api accounts-service account-link-service corridor-engine opportunity-ranker signal-engine corridor-intelligence-service debate-service status-service regime-classifier movement-feature-builder venue-anomaly-detector route-optimizer signal-replay-service
+  # API plane + governance (sandbox; see infra/terraform/main.tf + scripts/wire_api_plane_urls.sh)
+  partner-auth public-api-gateway routing-service wallet-service api-metering connector-runtime
+  approval-gate-service agent-registry agent-evals developer-portal admin-console
+  onramp-orchestrator offramp-orchestrator settlement-status webhook-service tenant-billing
 )
 
 # ── flags ─────────────────────────────────────────────────────────────────────

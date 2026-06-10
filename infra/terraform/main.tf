@@ -63,6 +63,11 @@ locals {
     "arb-sentiment-events",
     # Africa corridor-engine → notification-dispatcher (alert-only).
     "arb-corridor-alerts",
+    # API-plane lifecycle events (sandbox): on/off-ramp + billing emit these wrapped
+    # in the canonical EventEnvelope; settlement-status + webhook-service consume them.
+    "funding-events",
+    "payout-events",
+    "billing-events",
   ]
 
   # Subscription convention: <topic>-<consumer-service>
@@ -84,6 +89,11 @@ locals {
     "arb-audit-log-ledger"        = "arb-audit-log"
     # Africa corridor alerts → notification-dispatcher (ops alert).
     "arb-corridor-alerts-dispatcher" = "arb-corridor-alerts"
+    # API plane (sandbox): settlement-status + webhook-service consume funding/payout events.
+    "funding-events-settlement" = "funding-events"
+    "payout-events-settlement"  = "payout-events"
+    "funding-events-webhook"    = "funding-events"
+    "payout-events-webhook"     = "payout-events"
   }
 
   # BigQuery datasets — table-expiration rules:
@@ -267,6 +277,43 @@ locals {
       subscribe_subs = []
       cpu_idle       = true
     }
+
+    # ===== Full-system deploy: API plane + governance + intelligence =====
+    # Verified stateless (no Pub/Sub subscribers, no required secrets at import);
+    # internal ingress by default — reach the UIs/gateway via
+    #   gcloud run services proxy <svc> --region <region>
+    # SANDBOX: the API-plane services are in-memory (state resets on revision
+    # change); fine for a paper deploy, needs Redis/Cloud-SQL backing before live.
+    # Inter-service HTTP URLs (gateway→upstreams, portal, admin, billing→metering,
+    # registry→evals) are wired POST-deploy by scripts/wire_api_plane_urls.sh —
+    # same convention as core-api's ACCOUNTS_SERVICE_URL (avoids a Cloud Run url cycle).
+    "partner-auth"                  = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "public-api-gateway"            = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "routing-service"               = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "wallet-service"                = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "api-metering"                  = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "connector-runtime"             = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "agent-registry"                = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "agent-evals"                   = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "developer-portal"              = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "admin-console"                 = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "status-service"                = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "signal-engine"                 = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "regime-classifier"             = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "movement-feature-builder"      = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "route-optimizer"               = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "venue-anomaly-detector"        = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "signal-replay-service"         = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "corridor-intelligence-service" = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "debate-service"                = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "account-link-service"          = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    # Event-driven API-plane services (publish/subscribe the funding/payout/billing topics).
+    "onramp-orchestrator"   = { secrets = [], publish_topics = ["funding-events"], subscribe_subs = [], cpu_idle = true }
+    "offramp-orchestrator"  = { secrets = [], publish_topics = ["payout-events"], subscribe_subs = [], cpu_idle = true }
+    "tenant-billing"        = { secrets = [], publish_topics = ["billing-events"], subscribe_subs = [], cpu_idle = true }
+    "approval-gate-service" = { secrets = [], publish_topics = ["arb-audit-log"], subscribe_subs = [], cpu_idle = true }
+    "settlement-status"     = { secrets = [], publish_topics = [], subscribe_subs = ["funding-events-settlement", "payout-events-settlement"], cpu_idle = true }
+    "webhook-service"       = { secrets = [], publish_topics = [], subscribe_subs = ["funding-events-webhook", "payout-events-webhook"], cpu_idle = true }
   }
 
   # Flat list of every distinct secret ID used anywhere in the system.
