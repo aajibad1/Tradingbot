@@ -49,6 +49,30 @@ def test_status_endpoint_200_when_ok(monkeypatch):
     assert r.status_code == 200 and r.json()["status"] == "ok"
 
 
+def test_status_endpoint_200_when_degraded(monkeypatch):
+    """Degraded = a NON-critical dep is down but the platform still serves, so it
+    must NOT trip external uptime monitors — 200, not 503 (docs/SLOS.md)."""
+    from fastapi.testclient import TestClient
+    from shared.health import Component
+    monkeypatch.setattr(main, "collect", lambda: [
+        Component("redis", HealthStatus.OK, critical=True),
+        Component("ai-ops", HealthStatus.DOWN, critical=False),
+    ])
+    r = TestClient(main.app).get("/status")
+    assert r.status_code == 200 and r.json()["status"] == "degraded"
+
+
+def test_api_contract_correlation_headers_present(monkeypatch):
+    """The shared API contract (docs/06) is wired: every response echoes
+    x-request-id / x-correlation-id."""
+    from fastapi.testclient import TestClient
+    from shared.http import CORRELATION_ID_HEADER, REQUEST_ID_HEADER
+
+    r = TestClient(main.app).get("/healthz")
+    assert r.headers[REQUEST_ID_HEADER].startswith("req_")
+    assert r.headers[CORRELATION_ID_HEADER].startswith("corr_")
+
+
 def test_targets_parsing(monkeypatch):
     monkeypatch.setenv("STATUS_TARGETS", "risk-engine=http://risk:8080, core-api=http://core:8080/")
     monkeypatch.setenv("STATUS_NONCRITICAL", "core-api")

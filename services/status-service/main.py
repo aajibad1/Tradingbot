@@ -25,12 +25,17 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from shared.health import Component, HealthStatus, build_report, run_check
+from shared.http import install_contract
 from shared.slo import DEFAULT_SLOS, SLOSeverity, evaluate_all, worst_severity
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("status-service")
 
 app = FastAPI(title="status-service", version="0.1.0")
+# Platform API contract (docs/06): x-request-id / x-correlation-id propagation +
+# standard error envelope. status-service serves the status page, so correlatable
+# requests + a uniform error shape matter for the ops/uptime tooling that polls it.
+install_contract(app, service_name="status-service")
 
 
 def _redis_probe() -> bool:
@@ -80,8 +85,11 @@ def healthz() -> dict[str, str]:
 @app.get("/status")
 def status() -> JSONResponse:
     report = build_report(collect())
-    # Surface unhealthy platform as a 503 so external uptime monitors trip.
-    code = 200 if report.status is HealthStatus.OK else 503
+    # Status semantics (docs/SLOS.md): ok and degraded both still SERVE, so they
+    # return 200 — only a critical-down (DOWN) returns 503 to trip external uptime
+    # monitors. Returning 503 for degraded would page on-call for a platform that
+    # is, by definition, still serving.
+    code = 503 if report.status is HealthStatus.DOWN else 200
     return JSONResponse(report.to_dict(), status_code=code)
 
 
