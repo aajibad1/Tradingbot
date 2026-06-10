@@ -85,9 +85,11 @@ interactive testing (status-service at :8087 aggregates the live mesh: `/status`
 
 End-to-end local smokes (no GCP):
 `./scripts/control_plane_smoke.sh` (onboarding→billing→funding→live-enable→dashboard),
-`./scripts/paper_trade_local.sh` (risk-engine + paper-trader trade flow), and
+`./scripts/paper_trade_local.sh` (risk-engine + paper-trader trade flow),
 `./scripts/failover_smoke.sh` (status-service ok→degraded→down semantics under
-killed dependencies — reliability #1). All use only indexed bash arrays (macOS bash 3.2).
+killed dependencies — reliability #1), and
+`./scripts/api_plane_smoke.sh` (sandbox API plane: partner-auth→gateway→{routing,
+onramp,wallet}; auth→scope→meter→proxy). All use only indexed bash arrays (macOS bash 3.2).
 Frontend: `cd apps/frontend && npm install && npm run dev` (needs core-api on :8080).
 
 ## Running tests
