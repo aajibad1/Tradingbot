@@ -165,7 +165,11 @@ trading wedge under slightly different names. Status: ✅ built · 🟡 partial/
 | web-frontend | `apps/frontend` (Next.js) | ✅ |
 | public-api-gateway | `services/public-api-gateway` | ✅ authenticated (partner-auth) + metered (api-metering) proxy to the API plane |
 | developer-portal | `services/developer-portal` | ✅ self-serve key mgmt + sandbox playground + API catalog (FastAPI-served UI, server-side proxy → no CORS/npm) |
-| admin-console | — (`services/dashboard-api` is a partial ops API) | 🟡 |
+| admin-console | `services/admin-console` | ✅ ops/compliance oversight: health + per-tenant keys/usage/invoices + webhook deliveries (read-only, best-effort health) |
+
+All non-gated doc-05 surfaces now exist. Both consoles follow the same
+locally-testable pattern: a FastAPI-served single-page UI that calls only its own
+endpoints, which proxy server-side to the platform services (no CORS, no npm).
 
 ### API plane (live rails gated on licensing — see docs/REGULATORY_BRIEF.md)
 | Blueprint | Repo | Status |
