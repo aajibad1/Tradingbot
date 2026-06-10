@@ -13,6 +13,7 @@ from ml_export import (
     export_training_rows,
     label_training_row,
     score_advisory,
+    summarize_funnel,
 )
 
 
@@ -105,6 +106,49 @@ def test_score_advisory_coin_flip_has_unit_lift() -> None:
     sc = score_advisory(rows)
     assert sc["precision"] == 0.5 and sc["base_rate"] == 0.5
     assert sc["lift"] == 1.0
+
+
+def _funnel_row(strategy="funding_rate_arb", approved=True, executed=False,
+                profitable=None, pnl=None) -> dict:
+    return {"strategy": strategy, "approved": approved, "was_executed": executed,
+            "label_profitable": profitable, "realized_net_pnl_usd": pnl}
+
+
+def test_funnel_stage_rates_are_conditioned_on_previous_stage() -> None:
+    rows = [
+        _funnel_row(approved=True, executed=True, profitable=True, pnl=100.0),
+        _funnel_row(approved=True, executed=True, profitable=False, pnl=-40.0),
+        _funnel_row(approved=True, executed=False),   # approved but not (yet) filled
+        _funnel_row(approved=False),                  # rejected
+    ]
+    o = summarize_funnel(rows)["overall"]
+    assert o["detected"] == 4
+    assert o["approved"] == 3
+    assert o["executed"] == 2
+    assert o["profitable"] == 1
+    assert o["approval_rate"] == 0.75      # 3/4
+    assert round(o["execution_rate"], 4) == round(2 / 3, 4)  # 2/3 of approved
+    assert o["win_rate"] == 0.5            # 1/2 of executed
+    assert o["realized_net_pnl_usd"] == 60.0
+
+
+def test_funnel_breaks_out_by_strategy() -> None:
+    rows = [
+        _funnel_row(strategy="funding_rate_arb", approved=True, executed=True, profitable=True, pnl=10.0),
+        _funnel_row(strategy="directional", approved=False),
+    ]
+    out = summarize_funnel(rows)
+    assert set(out["by_strategy"]) == {"funding_rate_arb", "directional"}
+    assert out["by_strategy"]["funding_rate_arb"]["win_rate"] == 1.0
+    assert out["by_strategy"]["directional"]["approval_rate"] == 0.0
+
+
+def test_funnel_empty_has_none_rates_not_zero_division() -> None:
+    o = summarize_funnel([])["overall"]
+    assert o["detected"] == 0
+    assert o["approval_rate"] is None
+    assert o["win_rate"] is None
+    assert o["realized_net_pnl_usd"] == 0.0
 
 
 @patch("ml_export._bq_client")

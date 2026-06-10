@@ -212,3 +212,47 @@ def score_advisory(rows) -> dict:
         "lift": round(lift, 4) if lift is not None else None,
         "brier": round(brier, 4),
     }
+
+
+def _ratio(numerator: int, denominator: int) -> float | None:
+    """Conversion ratio, or None when there is no denominator to divide by."""
+    return round(numerator / denominator, 4) if denominator else None
+
+
+def _funnel_counts(rows) -> dict:
+    """Stage counts + realized PnL for one set of training rows (pure helper)."""
+    detected = len(rows)
+    approved = sum(1 for r in rows if r.get("approved"))
+    executed = sum(1 for r in rows if r.get("was_executed"))
+    profitable = sum(1 for r in rows if r.get("label_profitable") is True)
+    realized_pnl = sum(r["realized_net_pnl_usd"] for r in rows
+                       if r.get("realized_net_pnl_usd") is not None)
+    return {
+        "detected": detected,
+        "approved": approved,
+        "executed": executed,
+        "profitable": profitable,
+        "approval_rate": _ratio(approved, detected),       # approved / detected
+        "execution_rate": _ratio(executed, approved),      # executed / approved
+        "win_rate": _ratio(profitable, executed),          # profitable / executed
+        "realized_net_pnl_usd": round(realized_pnl, 2),
+    }
+
+
+def summarize_funnel(rows) -> dict:
+    """Conversion funnel: detected → approved → executed → profitable.
+
+    The core "is the wedge working?" operating metric. Each stage's rate is
+    conditioned on the previous stage (approval_rate = approved/detected, etc.),
+    so a leak is attributable to a specific stage. Broken out ``by_strategy`` to
+    show which strategy families actually convert. Pure: training rows in
+    (from :func:`fetch_training_rows`), a metrics dict out.
+    """
+    materialized = list(rows)
+    grouped: dict[str, list] = {}
+    for r in materialized:
+        grouped.setdefault(r.get("strategy") or "unknown", []).append(r)
+    return {
+        "overall": _funnel_counts(materialized),
+        "by_strategy": {s: _funnel_counts(g) for s, g in sorted(grouped.items())},
+    }

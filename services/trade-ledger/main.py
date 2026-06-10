@@ -32,7 +32,12 @@ from shared.models.opportunity import Opportunity
 from shared.models.risk_decision import RiskDecision
 from shared.models.trade import Trade
 from exec_quality import route_quality
-from ml_export import export_training_rows, fetch_training_rows, score_advisory
+from ml_export import (
+    export_training_rows,
+    fetch_training_rows,
+    score_advisory,
+    summarize_funnel,
+)
 from tax_export import export_funding_income_year, export_year
 from tick_collector import TickBuffer
 
@@ -294,3 +299,21 @@ def ml_route_quality(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     return {"window": {"start": start, "end": end}, **report}
+
+
+@app.get("/ml-export/funnel")
+def ml_funnel(
+    start: str = Query(pattern=_ISO_DATE, description="Inclusive start date YYYY-MM-DD"),
+    end: str = Query(pattern=_ISO_DATE, description="Exclusive end date YYYY-MM-DD"),
+) -> dict:
+    """Conversion funnel over [start, end): detected → approved → executed → profitable.
+
+    The core operating readout for the trading wedge — stage-conditioned rates so a
+    leak is attributable to a stage, broken out by strategy. See
+    ``ml_export.summarize_funnel``.
+    """
+    try:
+        funnel = summarize_funnel(fetch_training_rows(start, end))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return {"window": {"start": start, "end": end}, **funnel}
