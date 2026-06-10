@@ -151,7 +151,7 @@ trading wedge under slightly different names. Status: ✅ built · 🟡 partial/
 ### Shared-core intelligence / infra
 | Blueprint | Repo | Status |
 |---|---|---|
-| connector-runtime | `shared/connectors/adapter.py` (contract) | 🟡 contract only |
+| connector-runtime | `services/connector-runtime` (registry + health) + `shared/connectors/adapter.py` (contract) | ✅ catalog of pluggable venues + health read model (no creds/IO) |
 | normalization-service | `shared/utils/exchange_normalizer.py` (library, not a service) | 🟡 lib |
 | route-optimizer | `services/route-optimizer` (advisory; calibrates from fills) | ✅ |
 | venue-health-service | `services/venue-anomaly-detector` + market-data `health:latency:*` | ✅ |
