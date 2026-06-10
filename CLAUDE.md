@@ -21,6 +21,7 @@ services/
   # Execution plane — Africa market (FX/stablecoin corridors), alert-only
   corridor-engine/         Scores corridors w/ settlement risk → arb-corridor-alerts
   # API plane — partner orchestration (docs/05–06). SANDBOX only; live rails gated on licensing.
+  public-api-gateway/      Front door: authenticate (partner-auth) + meter (api-metering) + proxy
   routing-service/         Resolve best provider/corridor (cost|speed) for a transfer; advisory
   wallet-service/          Per-tenant wallets + aggregated balances; overdraft-protected adjust
   onramp-orchestrator/     Fiat→stablecoin on-ramp (sandbox simulator) → funding-events
@@ -115,6 +116,7 @@ PYTHONPATH=.:services/api-metering         python3 -m pytest services/api-meteri
 PYTHONPATH=.:services/tenant-billing       python3 -m pytest services/tenant-billing/tests/ -v
 PYTHONPATH=.:services/routing-service      python3 -m pytest services/routing-service/tests/ -v
 PYTHONPATH=.:services/wallet-service       python3 -m pytest services/wallet-service/tests/ -v
+PYTHONPATH=.:services/public-api-gateway   python3 -m pytest services/public-api-gateway/tests/ -v
 
 # All services in one run (note PYTHONPATH order)
 PYTHONPATH=.:services/risk-engine:services/paper-trader:services/market-data:services/funding-rate-service \
