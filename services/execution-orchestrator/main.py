@@ -1,7 +1,8 @@
 """execution-orchestrator — routes risk-approved opportunities through human approval to Hummingbot.
 
 Inbound:
-  arb-opportunities  (Pub/Sub) — execute=True only; the rest are dropped.
+  arb-approved  (Pub/Sub, sub: arb-approved-orchestrator) — risk-approved opps
+  with execute=True; anything without execute=True is dropped defensively.
 
 Endpoints:
   GET  /healthz
@@ -37,7 +38,9 @@ from approval_gate import (
     _redis,
 )
 from hummingbot_client import HummingbotClient, HummingbotOrderRequest
+from shared.http import install_contract
 from shared.models.opportunity import Opportunity
+from shared.pubsub.publisher import pubsub_project_id
 from spot_router import route_for_execution
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -69,9 +72,9 @@ def _on_opportunity(message) -> None:
 
 def _start_subscribers() -> None:
     global _subscriber_client
-    project_id = os.environ.get("GCP_PROJECT_ID")
+    project_id = pubsub_project_id()
     if not project_id:
-        logger.warning("GCP_PROJECT_ID unset — orchestrator running without Pub/Sub")
+        logger.warning("Pub/Sub disabled — orchestrator running without subscriber (local mode)")
         return
     from google.cloud import pubsub_v1
 
@@ -102,6 +105,10 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="execution-orchestrator", version="0.1.0", lifespan=lifespan)
+# Platform API contract (docs/06): x-request-id / x-correlation-id propagation +
+# standard error envelope. The Slack interaction + tick endpoints are operator-
+# facing, so correlatable requests aid incident tracing on the live path.
+install_contract(app, service_name="execution-orchestrator")
 
 
 @app.get("/healthz")
