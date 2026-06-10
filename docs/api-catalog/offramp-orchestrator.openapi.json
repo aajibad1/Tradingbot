@@ -1,0 +1,457 @@
+{
+  "components": {
+    "schemas": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "Order": {
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "number"
+          },
+          "correlation_id": {
+            "title": "Correlation Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dest_amount": {
+            "title": "Dest Amount",
+            "type": "number"
+          },
+          "dest_currency": {
+            "title": "Dest Currency",
+            "type": "string"
+          },
+          "destination_account": {
+            "title": "Destination Account",
+            "type": "string"
+          },
+          "fee": {
+            "title": "Fee",
+            "type": "number"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "source_asset": {
+            "title": "Source Asset",
+            "type": "string"
+          },
+          "status": {
+            "description": "One of shared.http.Status (pending\u2192processing\u2192completed/failed)",
+            "title": "Status",
+            "type": "string"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Id"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "source_asset",
+          "dest_currency",
+          "amount",
+          "fee",
+          "dest_amount",
+          "destination_account",
+          "correlation_id",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "Order",
+        "type": "object"
+      },
+      "OrderRequest": {
+        "properties": {
+          "amount": {
+            "exclusiveMinimum": 0.0,
+            "title": "Amount",
+            "type": "number"
+          },
+          "corridor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corridor"
+          },
+          "dest_currency": {
+            "title": "Dest Currency",
+            "type": "string"
+          },
+          "destination_account": {
+            "description": "Bank / mobile-money account the fiat lands in",
+            "title": "Destination Account",
+            "type": "string"
+          },
+          "quote_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional prior quote to honor",
+            "title": "Quote Id"
+          },
+          "source_asset": {
+            "title": "Source Asset",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_asset",
+          "dest_currency",
+          "amount",
+          "destination_account"
+        ],
+        "title": "OrderRequest",
+        "type": "object"
+      },
+      "Quote": {
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "number"
+          },
+          "dest_amount": {
+            "description": "Net amount delivered in dest_currency (fiat)",
+            "title": "Dest Amount",
+            "type": "number"
+          },
+          "dest_currency": {
+            "title": "Dest Currency",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "fee": {
+            "description": "Fee in source_asset",
+            "title": "Fee",
+            "type": "number"
+          },
+          "quote_id": {
+            "title": "Quote Id",
+            "type": "string"
+          },
+          "rate": {
+            "description": "dest_currency per 1 source_asset",
+            "title": "Rate",
+            "type": "number"
+          },
+          "source_asset": {
+            "title": "Source Asset",
+            "type": "string"
+          }
+        },
+        "required": [
+          "quote_id",
+          "source_asset",
+          "dest_currency",
+          "amount",
+          "fee",
+          "rate",
+          "dest_amount",
+          "expires_at"
+        ],
+        "title": "Quote",
+        "type": "object"
+      },
+      "QuoteRequest": {
+        "properties": {
+          "amount": {
+            "description": "Amount in source_asset (stablecoin)",
+            "exclusiveMinimum": 0.0,
+            "title": "Amount",
+            "type": "number"
+          },
+          "corridor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional explicit corridor id",
+            "title": "Corridor"
+          },
+          "dest_currency": {
+            "description": "Fiat ISO code, e.g. NGN, KES, GHS",
+            "title": "Dest Currency",
+            "type": "string"
+          },
+          "source_asset": {
+            "description": "Stablecoin, e.g. USDC, USDT",
+            "title": "Source Asset",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_asset",
+          "dest_currency",
+          "amount"
+        ],
+        "title": "QuoteRequest",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "offramp-orchestrator",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "healthz_healthz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Healthz Healthz Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Healthz"
+      }
+    },
+    "/v1/offramp/orders": {
+      "post": {
+        "operationId": "create_order_v1_offramp_orders_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Order"
+      }
+    },
+    "/v1/offramp/orders/{order_id}": {
+      "get": {
+        "operationId": "get_order_v1_offramp_orders__order_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "title": "Order Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Order"
+      }
+    },
+    "/v1/offramp/orders/{order_id}/advance": {
+      "post": {
+        "description": "Advance the sandbox payout one step and emit the payout event.\n\npending \u2192 processing (payout.processing) \u2192 completed (payout.completed).\nA terminal order is returned unchanged (idempotent).",
+        "operationId": "advance_order_v1_offramp_orders__order_id__advance_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "title": "Order Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Advance Order"
+      }
+    },
+    "/v1/offramp/quotes": {
+      "post": {
+        "operationId": "create_quote_v1_offramp_quotes_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Quote"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Quote"
+      }
+    }
+  }
+}
