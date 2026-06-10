@@ -38,6 +38,9 @@ SUBSCRIPTIONS: dict[str, str] = {
     "arb-ai-proposals-ledger": "arb-ai-proposals",
     "arb-audit-log-ledger": "arb-audit-log",
     "arb-corridor-alerts-dispatcher": "arb-corridor-alerts",
+    # API plane (sandbox): settlement-status projects funding + payout lifecycles.
+    "funding-events-settlement": "funding-events",
+    "payout-events-settlement": "payout-events",
 }
 
 
