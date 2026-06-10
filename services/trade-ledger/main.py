@@ -31,6 +31,7 @@ from shared.models.funding_rate import FundingRate
 from shared.models.opportunity import Opportunity
 from shared.models.risk_decision import RiskDecision
 from shared.models.trade import Trade
+from exec_quality import route_quality
 from ml_export import export_training_rows, fetch_training_rows, score_advisory
 from tax_export import export_funding_income_year, export_year
 from tick_collector import TickBuffer
@@ -275,3 +276,21 @@ def ml_advisory_scorecard(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     return {"window": {"start": start, "end": end}, "advisory": scorecard}
+
+
+@app.get("/ml-export/route-quality")
+def ml_route_quality(
+    start: str = Query(pattern=_ISO_DATE, description="Inclusive start date YYYY-MM-DD"),
+    end: str = Query(pattern=_ISO_DATE, description="Exclusive end date YYYY-MM-DD"),
+) -> dict:
+    """Per-venue realized-vs-modeled execution quality over [start, end).
+
+    Feeds the route-optimizer real ``slippage`` calibration instead of guesses:
+    a positive ``slippage_gap_bps`` means a venue fills worse than the model
+    predicted (down-weight it); negative means better. See ``exec_quality.py``.
+    """
+    try:
+        report = route_quality(start, end)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return {"window": {"start": start, "end": end}, **report}
