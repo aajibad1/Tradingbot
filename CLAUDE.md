@@ -46,6 +46,11 @@ The control plane (`core-api`/`accounts-service`) is **Cloud SQL Postgres-backed
 locally on SQLite with no cloud deps (`AUTH_PROVIDER` unset = local bearer; managed custody
 decided — see `docs/REGULATORY_BRIEF.md`).
 
+Run the whole thing locally (no GCP): `./scripts/local_stack.sh` boots the wedge +
+control plane + analytics together on SQLite/Redis/NullPublisher and stays up for
+interactive testing (status-service at :8087 aggregates the live mesh: `/status`,
+`/slo/catalog`, `/slo/evaluate`). Needs a reachable Redis.
+
 End-to-end local smokes (no GCP):
 `./scripts/control_plane_smoke.sh` (onboarding→billing→funding→live-enable→dashboard) and
 `./scripts/paper_trade_local.sh` (risk-engine + paper-trader trade flow).
