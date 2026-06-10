@@ -173,7 +173,8 @@ trading wedge under slightly different names. Status: ✅ built · 🟡 partial/
 | settlement-status | `services/settlement-status` | ✅ read model — projects funding+payout → normalized settlement |
 | partner-webhook | `services/webhook-service` | ✅ HMAC-signed delivery of funding/payout events; rotate-secret + replay |
 | partner-auth | `services/partner-auth` | ✅ API-key issue/verify/rotate/revoke; secrets hashed; prod keys gated |
-| api-metering / tenant-billing | — | ❌ not started |
+| api-metering | `services/api-metering` | ✅ per-tenant usage by route/period; quotas + soft overage |
+| tenant-billing | — | ❌ not started |
 
 The on/off-ramp orchestrators are the doc-sanctioned sandbox-first build (docs/06
 sandbox tier): each exercises the full platform contract end to end —
