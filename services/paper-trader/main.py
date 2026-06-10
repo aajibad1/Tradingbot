@@ -204,13 +204,15 @@ def _simulate_internal(req: SimulateRequest) -> Trade | None:
 
 def _start_subscriber() -> None:
     global _subscriber_future
-    if not os.environ.get("GCP_PROJECT_ID"):
-        logger.warning("GCP_PROJECT_ID unset — running without Pub/Sub subscriber (local mode)")
+    from shared.pubsub.publisher import pubsub_project_id
+
+    project_id = pubsub_project_id()
+    if not project_id:
+        logger.warning("Pub/Sub disabled — running without subscriber (local mode)")
         return
 
     from google.cloud import pubsub_v1
 
-    project_id = os.environ["GCP_PROJECT_ID"]
     # Consume APPROVED opportunities (arb-approved) — risk-engine only forwards
     # risk-approved opps here with execute=True. Never subscribe to the raw
     # arb-opportunities feed, or unapproved trades would execute.

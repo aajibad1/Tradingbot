@@ -133,3 +133,26 @@ def test_audit_log_to_row_includes_metadata() -> None:
     assert row["event_type"] == "limit_change_proposed"
     assert row["actor"] == "claude@ai-ops"
     assert row["metadata"] == {"old_value": 50000, "new_value": 75000}
+
+
+def test_write_is_local_sink_without_project(monkeypatch, caplog) -> None:
+    """In local / emulator mode (no GCP_PROJECT_ID) writes log instead of hitting
+    BigQuery — so trade-ledger can run in the local stack without a BQ backend."""
+    import logging
+
+    import writer
+
+    monkeypatch.setattr(writer, "_PROJECT", None)
+    # _client() must NOT be called when there is no project.
+    monkeypatch.setattr(writer, "_client",
+                        lambda: (_ for _ in ()).throw(AssertionError("BQ client used in local mode")))
+    trade = Trade(
+        id="t-local", opportunity_id="o1", type=TradeType.PAPER, status=TradeStatus.CLOSED,
+        gross_pnl_usd=1.0, net_pnl_usd=1.0, opened_at=datetime(2026, 1, 1),
+        legs=[TradeLeg(exchange="kraken", side="buy", asset="BTC", size=0.1,
+                       fill_price=60_000, fee_usd=1.0, slippage_usd=0.1,
+                       filled_at=datetime(2026, 1, 1))],
+    )
+    with caplog.at_level(logging.INFO):
+        writer.write_trade(trade)   # must not raise
+    assert any("local-sink" in r.message for r in caplog.records)

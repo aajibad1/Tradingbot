@@ -5,7 +5,13 @@ from datetime import datetime
 import pytest
 
 from shared.models.opportunity import Opportunity, StrategyType
-from shared.pubsub.publisher import NullPublisher, Topic, get_publisher
+from shared.pubsub.publisher import (
+    NullPublisher,
+    Topic,
+    get_publisher,
+    pubsub_enabled,
+    pubsub_project_id,
+)
 
 
 def _opp() -> Opportunity:
@@ -33,8 +39,34 @@ def test_topic_values_are_stable() -> None:
 
 def test_get_publisher_returns_null_without_gcp(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GCP_PROJECT_ID", raising=False)
+    monkeypatch.delenv("PUBSUB_EMULATOR_HOST", raising=False)
     pub = get_publisher()
     assert isinstance(pub, NullPublisher)
+
+
+def test_pubsub_resolver_real_gcp_takes_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GCP_PROJECT_ID", "prod-proj")
+    monkeypatch.setenv("PUBSUB_EMULATOR_HOST", "localhost:8085")
+    assert pubsub_project_id() == "prod-proj"   # real project wins over emulator
+    assert pubsub_enabled() is True
+
+
+def test_pubsub_resolver_emulator_without_gcp_project(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Emulator mode must NOT require GCP_PROJECT_ID (which would flip BQ/secrets on).
+    monkeypatch.delenv("GCP_PROJECT_ID", raising=False)
+    monkeypatch.setenv("PUBSUB_EMULATOR_HOST", "localhost:8085")
+    monkeypatch.delenv("PUBSUB_PROJECT_ID", raising=False)
+    assert pubsub_project_id() == "local-dev"   # default emulator project
+    assert pubsub_enabled() is True
+    monkeypatch.setenv("PUBSUB_PROJECT_ID", "custom")
+    assert pubsub_project_id() == "custom"
+
+
+def test_pubsub_disabled_when_nothing_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GCP_PROJECT_ID", raising=False)
+    monkeypatch.delenv("PUBSUB_EMULATOR_HOST", raising=False)
+    assert pubsub_project_id() is None
+    assert pubsub_enabled() is False
 
 
 def test_null_publisher_publish_and_audit() -> None:

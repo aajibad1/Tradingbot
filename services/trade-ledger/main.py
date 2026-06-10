@@ -26,6 +26,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import Response
 
 import writer
+from shared.pubsub.publisher import pubsub_project_id
 from shared.models.exchange_tick import ExchangeTick
 from shared.models.funding_rate import FundingRate
 from shared.models.opportunity import Opportunity
@@ -56,9 +57,9 @@ def _tick_collection_enabled() -> bool:
 
 def _start_subscribers() -> None:
     global _subscriber_client
-    project_id = os.environ.get("GCP_PROJECT_ID")
+    project_id = pubsub_project_id()
     if not project_id:
-        logger.warning("GCP_PROJECT_ID unset — trade-ledger will not subscribe (local mode)")
+        logger.warning("Pub/Sub disabled — trade-ledger will not subscribe (local mode)")
         return
 
     from google.cloud import pubsub_v1

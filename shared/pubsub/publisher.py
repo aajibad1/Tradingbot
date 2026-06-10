@@ -146,8 +146,32 @@ class NullPublisher:
         return self.publish(Topic.AUDIT_LOG, payload, {"source": source, "event": event})
 
 
+def pubsub_project_id() -> str | None:
+    """Project id to use for Pub/Sub, or None when Pub/Sub is disabled.
+
+    Real GCP keys off ``GCP_PROJECT_ID``. The LOCAL emulator keys off
+    ``PUBSUB_EMULATOR_HOST`` and uses ``PUBSUB_PROJECT_ID`` (default ``local-dev``)
+    — deliberately decoupled from ``GCP_PROJECT_ID`` so the emulator can carry the
+    real event flow locally while BigQuery (trade-ledger) and Secret Manager
+    (market-data) stay in their no-cloud local modes (those still gate on
+    ``GCP_PROJECT_ID``). The google-cloud-pubsub client auto-routes to the emulator
+    whenever ``PUBSUB_EMULATOR_HOST`` is set, with anonymous credentials."""
+    explicit = os.environ.get("GCP_PROJECT_ID")
+    if explicit:
+        return explicit
+    if os.environ.get("PUBSUB_EMULATOR_HOST"):
+        return os.environ.get("PUBSUB_PROJECT_ID", "local-dev")
+    return None
+
+
+def pubsub_enabled() -> bool:
+    """True when a real or emulated Pub/Sub backend is configured."""
+    return pubsub_project_id() is not None
+
+
 def get_publisher() -> EventPublisher | NullPublisher:
-    """Factory — returns NullPublisher when GCP_PROJECT_ID is unset."""
-    if not os.environ.get("GCP_PROJECT_ID"):
+    """Factory — NullPublisher unless real or emulated Pub/Sub is configured."""
+    project_id = pubsub_project_id()
+    if project_id is None:
         return NullPublisher()
-    return EventPublisher()
+    return EventPublisher(project_id=project_id)

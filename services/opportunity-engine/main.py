@@ -34,7 +34,7 @@ from models import EngineStatus, MarketSnapshot
 from scorer import score
 from shared.models.exchange_tick import ExchangeTick
 from shared.models.funding_rate import FundingRate
-from shared.pubsub.publisher import Topic, get_publisher
+from shared.pubsub.publisher import Topic, get_publisher, pubsub_project_id
 from shared.utils.fee_calculator import MIN_VIABLE_NET_EDGE_BPS, min_viable_net_edge_bps
 from shared.utils.fee_tracker import refresh_all
 from strategies import (
@@ -134,12 +134,13 @@ _subscriber = None
 
 def _start_subscriber() -> None:
     global _subscriber
-    if not os.environ.get("GCP_PROJECT_ID"):
-        logger.warning("GCP_PROJECT_ID unset — running without Pub/Sub subscriber (local mode)")
+    project_id = pubsub_project_id()
+    if not project_id:
+        logger.warning("Pub/Sub disabled — running without subscriber (local mode)")
         return
     from subscriber import PubSubSubscriber
 
-    _subscriber = PubSubSubscriber()
+    _subscriber = PubSubSubscriber(project_id=project_id)
     market_sub = os.environ.get("MARKET_DATA_SUBSCRIPTION", "arb-market-data-opp-engine")
     funding_sub = os.environ.get("FUNDING_RATES_SUBSCRIPTION", "arb-funding-rates-opp-engine")
     _subscriber.subscribe(market_sub, ExchangeTick, _on_tick)

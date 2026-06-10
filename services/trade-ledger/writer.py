@@ -38,9 +38,10 @@ def _client() -> bigquery.Client:
 
 
 def _table(dataset: str, table: str) -> str:
-    if not _PROJECT:
-        raise RuntimeError("GCP_PROJECT_ID unset")
-    return f"{_PROJECT}.{dataset}.{table}"
+    # Without a real project (local / Pub/Sub-emulator mode) we still return the
+    # logical name; _stream/_stream_many detect local mode and log instead of
+    # inserting, so the ledger can run in the local stack without BigQuery.
+    return f"{_PROJECT or 'local'}.{dataset}.{table}"
 
 
 def _stream(table_id: str, row: dict, row_id: str | None = None) -> None:
@@ -51,6 +52,9 @@ def _stream(table_id: str, row: dict, row_id: str | None = None) -> None:
     create duplicate rows. RAISES on insert errors so the Pub/Sub callback
     nacks and the message is redelivered — never silently drop an audit row.
     """
+    if not _PROJECT:
+        logger.info("ledger.local-sink %s row_id=%s row=%s", table_id, row_id, row)
+        return
     client = _client()
     row_ids = [row_id] if row_id is not None else None
     errors = client.insert_rows_json(table_id, [row], row_ids=row_ids)
@@ -62,6 +66,9 @@ def _stream_many(table_id: str, rows: list[dict]) -> None:
     """Batch streaming insert. Best-effort (logs, never raises) — used for the
     high-volume, lossy-tolerant tick stream, NOT the audit-critical tables."""
     if not rows:
+        return
+    if not _PROJECT:
+        logger.info("ledger.local-sink %s rows=%d", table_id, len(rows))
         return
     client = _client()
     errors = client.insert_rows_json(table_id, rows)

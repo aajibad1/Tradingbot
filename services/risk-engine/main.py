@@ -48,7 +48,7 @@ from models import (
 )
 from shared.models.opportunity import Opportunity
 from shared.models.trade import Trade
-from shared.pubsub.publisher import Topic, get_publisher
+from shared.pubsub.publisher import Topic, get_publisher, pubsub_project_id
 from rules.capital_validator import validate_capital
 from rules.drawdown_guard import DEFAULT_LIMITS, check_drawdown
 from rules.exchange_health import check_exchange_health
@@ -191,13 +191,13 @@ def _on_opportunity(message) -> None:
 def _start_subscribers() -> None:
     """Subscribe to arb-trade-fills so risk state tracks realized PnL/exposure.
 
-    Skipped without GCP_PROJECT_ID (local mode) — drive state via the
+    Skipped without Pub/Sub (local mode) — drive state via the
     POST /positions/apply-fill endpoint instead, matching the repo convention.
     """
     global _subscriber_client
-    project_id = os.environ.get("GCP_PROJECT_ID")
+    project_id = pubsub_project_id()
     if not project_id:
-        logger.warning("GCP_PROJECT_ID unset — risk-engine running without trade-fill subscriber")
+        logger.warning("Pub/Sub disabled — risk-engine running without trade-fill subscriber")
         return
     from google.cloud import pubsub_v1
 
