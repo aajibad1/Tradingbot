@@ -22,10 +22,18 @@ targets, to be tightened with real traffic.
 - Connector reconnect with exponential backoff; one bad symbol never takes a venue down.
 - Idempotent webhook + event-consumer write paths (provider event id / opportunity id).
 - Graceful degradation: AI advisory fail-open; accounts/funding optional-client; baseline fallbacks.
+  - *Tested failover:* the choke point survives a dead advisory ranker — a
+    configured-but-down opportunity-ranker never blocks approval
+    (`services/risk-engine/tests/test_advisory_failopen.py`).
 - Kill switch + drawdown guard cap downside synchronously.
 
 ## Status semantics
 status-service `/status` aggregates dependency probes:
-- **ok** — all critical components healthy.
-- **degraded** — a non-critical component is down (platform still serves).
+- **ok** (HTTP 200) — all critical components healthy.
+- **degraded** (HTTP 200) — a non-critical component is down (platform still
+  serves, so external uptime monitors must NOT trip).
 - **down** (HTTP 503) — a critical component is down; external uptime monitors trip.
+
+*Tested failover:* `scripts/failover_smoke.sh` boots the live mesh and kills a
+non-critical then a critical dependency, asserting the ok(200) → degraded(200) →
+down(503) transitions hold against real services.

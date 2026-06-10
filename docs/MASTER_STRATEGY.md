@@ -1,5 +1,11 @@
 # Master strategy — canonical index + coverage
 
+> **Two doc layers.** `01-master-strategy-architecture.md` (and the rest of the
+> numbered `01–12` set) is the forward-looking **blueprint handoff**. *This* doc is
+> the **reference/coverage map**: it reconciles the briefs to what's actually built
+> in the repo and carries the wedge-first sequencing guidance. Use 01 for the
+> vision; use this for "what exists and what's next."
+
 Consolidates the (many) strategy briefs into one source of truth, mapped to what's
 actually in this repo. Companion docs: `PLATFORM_ARCHITECTURE.md` (services),
 `CONNECTOR_ARCHITECTURE.md` (pluggable connectors), `REGULATORY_BRIEF.md` (custody/
@@ -43,7 +49,9 @@ serves both; data compounds across both (the flywheel + moat).
 ## Priority order (the brief's own, which we follow)
 
 1. **Trust & reliability** — controls exist; **prove them**: deploy, status/health
-   aggregation, SLOs, tested failover.
+   aggregation (status-service), SLOs (error-budget/burn-rate), tested failover
+   (`scripts/failover_smoke.sh` proves ok→degraded→down semantics live;
+   risk-engine advisory-ranker fail-open is unit-tested).
 2. **Narrow wedge** — pick ONE (funding-carry for global traders OR one Africa
    corridor) and dominate before broadening.
 3. Ease of use → 4. Proprietary data (needs users) → 5. Distribution → 6. AI depth.
