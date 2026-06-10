@@ -212,7 +212,9 @@ normalized settlement record per order (docs/05 "normalized statuses across prov
 | research-session-service | `services/corridor-intelligence-service`, `services/sentiment-service` (Perplexity) | 🟡 |
 | policy-enforcement-service | `services/risk-engine` (deterministic gate, sole authority) | ✅ |
 | approval-gate-service | `services/approval-gate-service` | ✅ enforces the AI permission model (read→auto, sensitive→human, withdrawals/leverage→hard-blocked); audit + model/prompt versioning |
-| agent-orchestrator / agent-memory / agent-registry / prompt-version-registry / agent-evals | — | ❌ (gated: build only once the advisory loop is proven live) |
+| agent-registry + prompt-version-registry | `services/agent-registry` | ✅ agents + immutable prompt/model versions; activation gated on a passing eval |
+| agent-evals | `services/agent-evals` | ✅ eval harness (accuracy/hallucination/latency thresholds) + promotion verdicts |
+| agent-orchestrator / agent-memory | — | ❌ (gated: autonomous mesh — build only once the advisory loop is proven live) |
 
 > The approval-gate is a **safety control, not an executor** — it returns a verdict
 > an executor must honor; it never performs the action. Building the brake before

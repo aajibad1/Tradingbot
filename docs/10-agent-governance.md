@@ -42,9 +42,13 @@ Defines how the multi-agent system behaves safely in production.
   leverage→hard-blocked), records model_version/prompt_version/evidence, and emits an
   audit event per proposal + decision. It is a safety control, never an executor.
 - **Deterministic policy enforcement** — `services/risk-engine` (the sole final authority).
+- **Agent + prompt/model versioning** — `services/agent-registry`: immutable prompt
+  versions; a version cannot be activated until it has a passing eval verdict.
+- **Eval harness + promotion gate** — `services/agent-evals`: accuracy/hallucination/
+  latency thresholds; the registry consults its verdict before activation.
 
-Still to build (gated — only once the advisory loop is proven live): agent
-orchestrator, scoped agent-memory, agent-registry, prompt-version-registry, eval harness.
+Still to build (gated — only once the advisory loop is proven live): the autonomous
+agent orchestrator and scoped agent-memory.
 
 ## Expansion task
 Claude should implement the agent control plane, audit trail, eval harness, and approval gating consistent with this document.

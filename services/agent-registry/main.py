@@ -1,0 +1,167 @@
+"""agent-registry — agents + immutable prompt/model versions (docs/10).
+
+Source of truth for "what agents exist and which version is live." Prompt versions
+are immutable (a version's content can never be silently changed — that would break
+traceability). Activating a version is GATED on a passing eval verdict from
+agent-evals: an un-evaluated or failing version cannot go live.
+
+Registry only — it stores and gates; it never runs an agent.
+
+Config: AGENT_EVALS_URL (when set, activation consults the eval verdict; when unset,
+activation is allowed — sandbox/bootstrap mode).
+
+Endpoints:
+  GET  /healthz
+  POST /v1/agents                         register an agent
+  GET  /v1/agents
+  GET  /v1/agents/{name}
+  POST /v1/agents/{name}/prompts          add an immutable prompt version
+  GET  /v1/agents/{name}/prompts
+  POST /v1/agents/{name}/activate         {version}  (gated on eval verdict)
+  GET  /v1/agents/{name}/active
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+import os
+from datetime import datetime, timezone
+from typing import Any
+
+import httpx
+from fastapi import FastAPI
+from pydantic import BaseModel, Field
+
+from shared.http import APIError, install_contract
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logger = logging.getLogger("agent-registry")
+
+PRODUCER = "agent-registry"
+
+# name -> agent dict; agent["prompts"][version] = prompt dict; agent["active"] = version|None
+_agents: dict[str, dict] = {}
+
+app = FastAPI(title="agent-registry", version="0.1.0")
+install_contract(app, service_name=PRODUCER)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class AgentCreate(BaseModel):
+    name: str
+    description: str = ""
+    provider: str = Field(default="claude", description="claude | perplexity | ...")
+    default_model: str | None = None
+
+
+class PromptVersion(BaseModel):
+    version: str = Field(description="e.g. 'v1', '2026-06-10'")
+    content: str = Field(description="the prompt text (hashed for integrity)")
+    notes: str = ""
+
+
+@app.get("/healthz")
+def healthz() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.post("/v1/agents")
+def create_agent(req: AgentCreate) -> dict[str, Any]:
+    if req.name in _agents:
+        raise APIError("agent_exists", f"agent {req.name} already registered", http_status=409)
+    _agents[req.name] = {
+        "name": req.name, "description": req.description, "provider": req.provider,
+        "default_model": req.default_model, "prompts": {}, "active": None, "created_at": _now(),
+    }
+    return _public(_agents[req.name])
+
+
+def _public(agent: dict) -> dict:
+    return {**{k: v for k, v in agent.items() if k != "prompts"},
+            "prompt_versions": sorted(agent["prompts"].keys())}
+
+
+def _get(name: str) -> dict:
+    a = _agents.get(name)
+    if a is None:
+        raise APIError("agent_not_found", f"agent {name} not found", http_status=404)
+    return a
+
+
+@app.get("/v1/agents")
+def list_agents() -> dict[str, Any]:
+    return {"agents": [_public(a) for a in _agents.values()], "count": len(_agents)}
+
+
+@app.get("/v1/agents/{name}")
+def get_agent(name: str) -> dict[str, Any]:
+    return _public(_get(name))
+
+
+@app.post("/v1/agents/{name}/prompts")
+def add_prompt(name: str, req: PromptVersion) -> dict[str, Any]:
+    agent = _get(name)
+    if req.version in agent["prompts"]:
+        raise APIError("version_exists",
+                       f"version {req.version} already exists (prompt versions are immutable)",
+                       http_status=409)
+    record = {
+        "version": req.version,
+        "content_hash": hashlib.sha256(req.content.encode("utf-8")).hexdigest(),
+        "notes": req.notes,
+        "created_at": _now(),
+    }
+    agent["prompts"][req.version] = record
+    return record
+
+
+@app.get("/v1/agents/{name}/prompts")
+def list_prompts(name: str) -> dict[str, Any]:
+    agent = _get(name)
+    return {"agent": name, "prompts": list(agent["prompts"].values()), "active": agent["active"]}
+
+
+def _eval_passed(agent: str, version: str) -> tuple[bool, str]:
+    """Consult agent-evals for a passing verdict. When AGENT_EVALS_URL is unset we
+    allow activation (sandbox/bootstrap). Fail-CLOSED on a reachable-but-not-passing
+    or un-evaluated version."""
+    url = os.environ.get("AGENT_EVALS_URL")
+    if not url:
+        return True, "evals not configured (sandbox)"
+    try:
+        r = httpx.get(f"{url.rstrip('/')}/v1/evals/verdict",
+                      params={"agent": agent, "version": version}, timeout=5.0)
+    except Exception:
+        return False, "eval service unreachable"
+    if r.status_code == 404:
+        return False, "version not evaluated"
+    try:
+        body = r.json()
+    except Exception:
+        return False, "bad eval response"
+    return bool(body.get("passed")), ("eval passed" if body.get("passed") else f"eval failed: {body.get('failures')}")
+
+
+@app.post("/v1/agents/{name}/activate")
+def activate(name: str, body: dict[str, Any]) -> dict[str, Any]:
+    agent = _get(name)
+    version = body.get("version")
+    if version not in agent["prompts"]:
+        raise APIError("version_not_found", f"{name} has no version {version}", http_status=404)
+    passed, reason = _eval_passed(name, version)
+    if not passed:
+        raise APIError("eval_not_passed",
+                       f"cannot activate {name} {version}: {reason}", http_status=409)
+    agent["active"] = version
+    logger.info("activated agent=%s version=%s (%s)", name, version, reason)
+    return {"agent": name, "active": version, "reason": reason}
+
+
+@app.get("/v1/agents/{name}/active")
+def get_active(name: str) -> dict[str, Any]:
+    agent = _get(name)
+    return {"agent": name, "active": agent["active"]}
