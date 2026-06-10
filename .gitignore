@@ -48,3 +48,7 @@ data/
 
 # Allow environment-specific tfvars (no secrets, just project_id)
 !infra/terraform/environments/*/terraform.tfvars
+
+# Redis snapshot from local dev/test
+dump.rdb
+*.rdb

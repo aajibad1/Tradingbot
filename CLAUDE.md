@@ -32,19 +32,40 @@ apps/
   frontend/                Next.js (App Router): onboarding stepper + dashboard → core-api
 shared/
   models/                  Pydantic schemas shared across every service (Opportunity, Trade, RiskState, ...)
-  pubsub/publisher.py      Topic enum + EventPublisher/NullPublisher factory
+  models/event_envelope.py Canonical event envelope (docs/07): EventEnvelope.wrap()/.attributes()
+  pubsub/publisher.py      Topic enum + EventPublisher/NullPublisher factory; publish_event() wraps in envelope
+  http/                    API contract (docs/06): install_contract(app) = correlation (x-request-id/
+                           x-correlation-id) + standard error model (APIError) + idempotency store
   tenant.py                Tenant namespacing: risk_key, exchange_secret_id, eligibility_key
   utils/                   fee_calculator, exchange_normalizer, slippage_model
-docs/PLATFORM_ARCHITECTURE.md   Multi-tenant two-market target + repo reconciliation
-docs/REGULATORY_BRIEF.md        Custody/licensing brief for counsel
-docs/ARCHITECTURE.md            Original single-tenant data-flow + risk-control reference
+# Blueprint layer — numbered handoff (01–12); each ends with an "Expansion task"
+docs/01-master-strategy-architecture.md  Vision, two monetization layers, build order
+docs/03-architecture.md                  Layered technical architecture (dual-business + agents)
+docs/05-service-specs.md                 Service-by-service implementation blueprint
+docs/06-api-contracts.md                 External/internal API contracts, correlation, errors
+docs/07-data-event-schema.md             Canonical entities + event taxonomy + envelope (impl: shared/models/event_envelope.py)
+docs/09-security-compliance.md           Security/compliance controls + go-live gates
+docs/10-agent-governance.md              Multi-agent safety, versioning, evals, approval gating
+docs/11-runbooks-go-live.md              Runbooks + go-live checklist
+# Reference layer — canonical detail the code points at (load-bearing)
+docs/MASTER_STRATEGY.md          Strategy index + repo coverage map (reconciles briefs to repo)
+docs/ARCHITECTURE.md             Data-flow, service ownership, risk-control invariants
+docs/PLATFORM_ARCHITECTURE.md    Multi-tenant two-market target + repo reconciliation
+docs/REGULATORY_BRIEF.md         Custody/licensing brief for counsel
+docs/CONNECTOR_ARCHITECTURE.md   Pluggable connector contract
+docs/STRATEGY_GUIDE.md           Strategies + net-edge math   docs/RISK_POLICY.md  Limits/kill switch/drawdown
+docs/EXCHANGE_FEES.md            Canonical per-venue taker fees   docs/TAX_COMPLIANCE.md  Wash-sale/FIFO/HIFO
+docs/MULTI_TENANCY.md  Tenant namespacing   docs/TRADING_ASSUMPTIONS.md  Promotion gates   docs/SLOS.md  SLO targets
 ```
+Two doc layers: the **blueprint** set (01–12) is the forward-looking handoff;
+the **reference** docs carry canonical detail (fees, risk limits, tax, SLOs) that
+code comments point at by name. Keep both in sync when either changes.
 
 Two markets, one core: **Global** = crypto funding-carry/basis (execution loop, paper);
-**Africa** = FX/stablecoin corridor arb (alert-only). See `docs/PLATFORM_ARCHITECTURE.md`.
+**Africa** = FX/stablecoin corridor arb (alert-only). See `docs/01-master-strategy-architecture.md` + `docs/03-architecture.md`.
 The control plane (`core-api`/`accounts-service`) is **Cloud SQL Postgres-backed** and runs
 locally on SQLite with no cloud deps (`AUTH_PROVIDER` unset = local bearer; managed custody
-decided — see `docs/REGULATORY_BRIEF.md`).
+decided — see `docs/09-security-compliance.md`).
 
 Run the whole thing locally (no GCP): `./scripts/local_stack.sh` boots the wedge +
 control plane + analytics together on SQLite/Redis/NullPublisher and stays up for
@@ -52,8 +73,10 @@ interactive testing (status-service at :8087 aggregates the live mesh: `/status`
 `/slo/catalog`, `/slo/evaluate`). Needs a reachable Redis.
 
 End-to-end local smokes (no GCP):
-`./scripts/control_plane_smoke.sh` (onboarding→billing→funding→live-enable→dashboard) and
-`./scripts/paper_trade_local.sh` (risk-engine + paper-trader trade flow).
+`./scripts/control_plane_smoke.sh` (onboarding→billing→funding→live-enable→dashboard),
+`./scripts/paper_trade_local.sh` (risk-engine + paper-trader trade flow), and
+`./scripts/failover_smoke.sh` (status-service ok→degraded→down semantics under
+killed dependencies — reliability #1). All use only indexed bash arrays (macOS bash 3.2).
 Frontend: `cd apps/frontend && npm install && npm run dev` (needs core-api on :8080).
 
 ## Running tests
@@ -140,4 +163,4 @@ The `risk:*` keys in Redis are documented at the top of `services/risk-engine/st
 
 - **Symbol normalization**: cross-venue comparisons use the canonical form from `shared/utils/exchange_normalizer.py` (`BTC/USD` or `BTC/USD:PERP`). `USDT`/`USDC`/`ZUSD` all collapse to `USD`. Kraken's `XBT` → `BTC`.
 - **Funding period**: Hyperliquid funds hourly (1.0h); other CEX perps fund every 8h. The split lives in `services/funding-rate-service/normalizer.py#from_ccxt` and `services/paper-trader/simulator/funding_simulator.py#funding_period_hours`.
-- **AI permission model** (see `docs/ARCHITECTURE.md`): read-only ops are autonomous; risk-limit or trade-size changes are propose-only and require Slack approval; withdrawals / leverage increases are hardcoded blocked.
+- **AI permission model** (see `docs/10-agent-governance.md`): read-only ops are autonomous; risk-limit or trade-size changes are propose-only and require Slack approval; withdrawals / leverage increases are hardcoded blocked.
