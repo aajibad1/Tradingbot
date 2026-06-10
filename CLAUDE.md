@@ -22,6 +22,7 @@ services/
   corridor-engine/         Scores corridors w/ settlement risk → arb-corridor-alerts
   # API plane — partner orchestration (docs/05–06). SANDBOX only; live rails gated on licensing.
   routing-service/         Resolve best provider/corridor (cost|speed) for a transfer; advisory
+  wallet-service/          Per-tenant wallets + aggregated balances; overdraft-protected adjust
   onramp-orchestrator/     Fiat→stablecoin on-ramp (sandbox simulator) → funding-events
   offramp-orchestrator/    Stablecoin→fiat payout (sandbox simulator) → payout-events
   settlement-status/       Read model: projects funding+payout events → normalized settlement
@@ -113,6 +114,7 @@ PYTHONPATH=.:services/partner-auth         python3 -m pytest services/partner-au
 PYTHONPATH=.:services/api-metering         python3 -m pytest services/api-metering/tests/ -v
 PYTHONPATH=.:services/tenant-billing       python3 -m pytest services/tenant-billing/tests/ -v
 PYTHONPATH=.:services/routing-service      python3 -m pytest services/routing-service/tests/ -v
+PYTHONPATH=.:services/wallet-service       python3 -m pytest services/wallet-service/tests/ -v
 
 # All services in one run (note PYTHONPATH order)
 PYTHONPATH=.:services/risk-engine:services/paper-trader:services/market-data:services/funding-rate-service \

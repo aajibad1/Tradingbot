@@ -186,7 +186,9 @@ production keys remain gated on licensing.
 `routing-service` (`services/routing-service`, docs/06 Routing) resolves the best
 provider/corridor for a transfer by objective (lowest cost / fastest settlement)
 over a sandbox provider catalog; advisory (moves no money), real connectors slot
-in behind the same interface later.
+in behind the same interface later. `wallet-service` (`services/wallet-service`,
+docs/06 Wallets & Balances) holds per-tenant wallets with overdraft-protected
+adjustments and aggregated balances (sandbox ledger; prod = accounts-service/custody).
 
 The on/off-ramp orchestrators are the doc-sanctioned sandbox-first build (docs/06
 sandbox tier): each exercises the full platform contract end to end —
