@@ -31,6 +31,7 @@ from shared.models.funding_rate import FundingRate
 from shared.models.opportunity import Opportunity
 from shared.models.risk_decision import RiskDecision
 from shared.models.trade import Trade
+from ml_export import export_training_rows
 from tax_export import export_funding_income_year, export_year
 from tick_collector import TickBuffer
 
@@ -224,5 +225,33 @@ def tax_export_funding_income(year: int = Query(ge=2020, le=2100)) -> Response:
         media_type="text/csv",
         headers={
             "Content-Disposition": f'attachment; filename="funding_income_{year}.csv"'
+        },
+    )
+
+
+_ISO_DATE = r"^\d{4}-\d{2}-\d{2}$"
+
+
+@app.get("/ml-export/decisions")
+def ml_export_decisions(
+    start: str = Query(pattern=_ISO_DATE, description="Inclusive start date YYYY-MM-DD"),
+    end: str = Query(pattern=_ISO_DATE, description="Exclusive end date YYYY-MM-DD"),
+) -> Response:
+    """ML training set (AI Phase A): decision features joined to realized outcome.
+
+    One CSV row per risk decision in [start, end), with the realized label from
+    the matching live trade (null when not executed). Feed this to the ranking /
+    risk model training pipeline — it is the labelled substrate the system accrues
+    from day one. See ``ml_export.py``.
+    """
+    try:
+        csv_body = export_training_rows(start, end)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return Response(
+        content=csv_body,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="risk_decisions_{start}_{end}.csv"'
         },
     )
