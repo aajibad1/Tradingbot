@@ -64,6 +64,10 @@ class Topic(str, Enum):
     # API-plane payout lifecycle (docs/06 off-ramp; docs/07 payout.*). Same envelope
     # + SANDBOX-only stance as FUNDING_EVENTS — see services/offramp-orchestrator.
     PAYOUT_EVENTS = "payout-events"
+    # API-plane billing ledger events (docs/06 "billing webhooks and ledger events";
+    # docs/07 billing.*). invoice.issued / invoice.paid via the canonical envelope —
+    # see services/tenant-billing.
+    BILLING_EVENTS = "billing-events"
 
 
 class EventPublisher:
