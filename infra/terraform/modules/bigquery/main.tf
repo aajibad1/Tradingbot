@@ -59,6 +59,12 @@ locals {
       time_partitioning = "emitted_at"
       clustering        = ["source", "event"]
     }
+    risk_decisions = {
+      dataset           = "arb_ml"
+      schema_file       = "${path.module}/schemas/risk_decisions.json"
+      time_partitioning = "decided_at"
+      clustering        = ["strategy", "approved"]
+    }
   }
 }
 

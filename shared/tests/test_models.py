@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from shared.models.exchange_tick import ExchangeTick, OrderBookLevel, OrderBookSnapshot
 from shared.models.funding_rate import FundingRate
 from shared.models.opportunity import Opportunity, StrategyType
+from shared.models.risk_decision import RiskDecision
 from shared.models.risk_state import (
     KillSwitchState,
     RiskRule,
@@ -138,6 +139,25 @@ def test_risk_state_and_kill_switch_defaults() -> None:
     assert v.rule.value == "daily_loss_limit"
     ks = KillSwitchState(active=True, triggered_by="risk-engine", reason="drawdown")
     assert ks.active and ks.triggered_by == "risk-engine"
+
+
+def test_risk_decision_roundtrips_json() -> None:
+    d = RiskDecision(
+        decision_id="o1:rd", opportunity_id="o1", tenant_id="t1",
+        strategy=StrategyType.FUNDING_RATE_ARB, asset="BTC",
+        long_exchange="kraken", short_exchange="hyperliquid", directional=False,
+        net_edge_bps=60.0, gross_spread_bps=0.0, trading_fees_bps=31.0,
+        slippage_estimate_bps=4.0, funding_rate_annualized_pct=15.0,
+        confidence_score=0.7, recommended_size_usd=10_000.0,
+        approved=False, kill_switch_active=False,
+        violation_rules=["per_trade_size_limit"], decided_at=datetime(2026, 1, 1),
+    )
+    back = RiskDecision.model_validate_json(d.model_dump_json())
+    assert back == d
+    assert back.violation_rules == ["per_trade_size_limit"]
+    # confidence_score is bounded 0..1 — the wire constraint must hold.
+    with pytest.raises(ValidationError):
+        RiskDecision(**{**d.model_dump(), "confidence_score": 1.5})
 
 
 def test_enum_value_stability() -> None:

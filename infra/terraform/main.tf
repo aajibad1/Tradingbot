@@ -51,6 +51,9 @@ locals {
     # arb-opportunities. See shared/pubsub/publisher.py:Topic.APPROVED_OPPORTUNITIES.
     "arb-approved",
     "arb-risk-alerts",
+    # Every risk-engine decision (approve AND reject) + feature snapshot → the ML
+    # substrate (AI Phase A). trade-ledger streams these to arb_ml.risk_decisions.
+    "arb-risk-decisions",
     "arb-trade-fills",
     "arb-ai-proposals",
     "arb-audit-log",
@@ -73,6 +76,7 @@ locals {
     "arb-approved-orchestrator"   = "arb-approved"
     "arb-risk-alerts-ledger"      = "arb-risk-alerts"
     "arb-risk-alerts-ai-ops"      = "arb-risk-alerts"
+    "arb-risk-decisions-ledger"   = "arb-risk-decisions"
     "arb-market-data-ledger"      = "arb-market-data"
     "arb-trade-fills-ledger"      = "arb-trade-fills"
     "arb-trade-fills-risk-engine" = "arb-trade-fills"
@@ -104,6 +108,10 @@ locals {
       description               = "AI proposals, evaluations, and feedback; 365-day expiration."
       default_table_expiry_days = 365
     }
+    arb_ml = {
+      description               = "ML training substrate (AI Phase A): risk-decision facts + features; labels accrue over time — DO NOT enable expiration."
+      default_table_expiry_days = 0
+    }
   }
 
   # Services and the secrets each needs least-privilege access to.
@@ -128,8 +136,9 @@ locals {
     }
     "risk-engine" = {
       secrets = ["KILL_SWITCH_RESET_TOKEN"]
-      # Publishes APPROVED opportunities to arb-approved (the approve→execute bridge).
-      publish_topics = ["arb-approved", "arb-risk-alerts", "arb-audit-log"]
+      # Publishes APPROVED opportunities to arb-approved (the approve→execute bridge),
+      # and EVERY decision (approve/reject) to arb-risk-decisions (AI Phase A fact).
+      publish_topics = ["arb-approved", "arb-risk-alerts", "arb-risk-decisions", "arb-audit-log"]
       # Subscribes to the raw opportunity feed (to gate + forward) and to trade
       # fills (to maintain risk:* state: daily PnL, exposure, concentration).
       subscribe_subs = ["arb-opportunities-risk-engine", "arb-trade-fills-risk-engine"]
@@ -149,6 +158,7 @@ locals {
         "arb-opportunities-ledger",
         "arb-trade-fills-ledger",
         "arb-risk-alerts-ledger",
+        "arb-risk-decisions-ledger",
         "arb-audit-log-ledger",
         "arb-ai-proposals-ledger",
         # Forward tick collection → arb_market_data.ticks (gated by env below).

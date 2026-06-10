@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 from shared.models.exchange_tick import ExchangeTick
 from shared.models.funding_rate import FundingRate
 from shared.models.opportunity import Opportunity
+from shared.models.risk_decision import RiskDecision
 from shared.models.trade import Trade
 
 if TYPE_CHECKING:
@@ -173,6 +174,34 @@ def audit_log_to_row(payload: dict) -> dict:
     }
 
 
+def risk_decision_to_row(decision: RiskDecision) -> dict:
+    """ML fact: one risk-engine decision + its decision-time feature snapshot."""
+    return {
+        "decision_id": decision.decision_id,
+        "opportunity_id": decision.opportunity_id,
+        "tenant_id": decision.tenant_id,
+        "strategy": decision.strategy.value,
+        "asset": decision.asset,
+        "long_exchange": decision.long_exchange,
+        "short_exchange": decision.short_exchange,
+        "directional": decision.directional,
+        "net_edge_bps": decision.net_edge_bps,
+        "gross_spread_bps": decision.gross_spread_bps,
+        "trading_fees_bps": decision.trading_fees_bps,
+        "slippage_estimate_bps": decision.slippage_estimate_bps,
+        "funding_rate_annualized_pct": decision.funding_rate_annualized_pct,
+        "confidence_score": decision.confidence_score,
+        "recommended_size_usd": decision.recommended_size_usd,
+        "approved": decision.approved,
+        "kill_switch_active": decision.kill_switch_active,
+        "violation_rules": decision.violation_rules,
+        "advisory_action": decision.advisory_action,
+        "advisory_probability": decision.advisory_probability,
+        "model_version": decision.model_version,
+        "decided_at": decision.decided_at.isoformat(),
+    }
+
+
 def tick_to_row(tick: ExchangeTick) -> dict:
     return {
         "exchange": tick.exchange,
@@ -215,3 +244,9 @@ def write_risk_alert(payload: dict) -> None:
 def write_audit_log(payload: dict) -> None:
     row_id = payload.get("event_id") or f"{payload['source']}:{payload['event_type']}:{payload['emitted_at']}"
     _stream(_table("arb_audit", "audit_log"), audit_log_to_row(payload), row_id=row_id)
+
+
+def write_risk_decision(decision: RiskDecision) -> None:
+    # One decision per opportunity — decision_id is its natural dedup key.
+    _stream(_table("arb_ml", "risk_decisions"),
+            risk_decision_to_row(decision), row_id=decision.decision_id)

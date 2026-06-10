@@ -38,6 +38,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 import position_tracker
+from decision_log import build_risk_decision
 from shared.tenant import DEFAULT_TENANT
 from models import (
     EvaluateRequest,
@@ -103,15 +104,36 @@ def _get_publisher():
     return _publisher
 
 
+def _decide(opp: Opportunity) -> tuple[EvaluateResponse, Opportunity | None]:
+    """Evaluate an opportunity EXACTLY ONCE and return (result, approved-copy|None).
+
+    Evaluation has side effects (a drawdown breach trips the kill switch *inside*
+    ``evaluate``), so callers must never double-evaluate. The approved copy is
+    marked ``execute=True`` ready for APPROVED_OPPORTUNITIES."""
+    result = evaluate(EvaluateRequest(opportunity=opp, tenant_id=opp.user_id))
+    approved = opp.model_copy(update={"execute": True}) if result.approved else None
+    return result, approved
+
+
 def evaluate_and_forward(opp: Opportunity) -> Opportunity | None:
     """Run the full risk evaluation for an opportunity; if approved, return a copy
     marked ``execute=True`` ready to publish to APPROVED_OPPORTUNITIES. This is the
     approve→execute bridge — the ONLY path that turns a detected opportunity into
     an executable one."""
-    result = evaluate(EvaluateRequest(opportunity=opp, tenant_id=opp.user_id))
-    if not result.approved:
-        return None
-    return opp.model_copy(update={"execute": True})
+    _, approved = _decide(opp)
+    return approved
+
+
+def _publish_decision(opp: Opportunity, result: EvaluateResponse, ranking: dict | None) -> None:
+    """Emit the RiskDecision fact (AI Phase A). FAIL-OPEN: instrumentation must
+    never break the choke point, so any error here is logged and swallowed."""
+    try:
+        decision = build_risk_decision(opp, result, ranking)
+        _get_publisher().publish(
+            Topic.RISK_DECISIONS, decision, attributes={"tenant": opp.user_id}
+        )
+    except Exception:
+        logger.warning("risk-decision instrumentation failed for opp=%s (non-fatal)", opp.id)
 
 
 def _advisory_rank(opp: Opportunity) -> dict | None:
@@ -145,7 +167,8 @@ def _on_opportunity(message) -> None:
         message.ack()  # malformed — don't redeliver forever
         return
     try:
-        approved = evaluate_and_forward(opp)
+        result, approved = _decide(opp)  # evaluate ONCE (side-effecting)
+        ranking = None
         if approved is not None:
             attrs = {"tenant": opp.user_id}
             ranking = _advisory_rank(approved)  # advisory annotation, never gates
@@ -158,6 +181,7 @@ def _on_opportunity(message) -> None:
                         f" (rank={attrs.get('rank_action')})" if ranking else "")
         else:
             logger.info("opportunity id=%s tenant=%s rejected — not forwarded", opp.id, opp.user_id)
+        _publish_decision(opp, result, ranking)  # AI Phase A fact (fail-open)
         message.ack()
     except Exception:
         logger.exception("failed to evaluate/forward opportunity id=%s", getattr(opp, "id", "?"))

@@ -36,6 +36,12 @@ class Topic(str, Enum):
     # ever execute. A separate topic avoids risk-engine re-consuming its own output.
     APPROVED_OPPORTUNITIES = "arb-approved"
     RISK_ALERTS = "arb-risk-alerts"
+    # Every risk-engine decision (approve AND reject) with its feature snapshot,
+    # emitted by ``_on_opportunity`` for the ML substrate (AI Phase A). trade-ledger
+    # streams these to ``arb_ml.risk_decisions``; the realized label joins back via
+    # opportunity_id. Instrumentation is FAIL-OPEN — a publish failure never blocks
+    # the gate. No service gates on this topic; it is data-capture only.
+    RISK_DECISIONS = "arb-risk-decisions"
     TRADE_FILLS = "arb-trade-fills"
     AI_PROPOSALS = "arb-ai-proposals"
     AUDIT_LOG = "arb-audit-log"

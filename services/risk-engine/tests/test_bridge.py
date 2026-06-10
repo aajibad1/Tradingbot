@@ -66,11 +66,17 @@ def test_approved_opportunity_is_forwarded_with_execute_true(fake_redis, monkeyp
     main._on_opportunity(msg)
 
     assert msg.acked
-    assert len(pub.published) == 1
-    topic, payload, attrs = pub.published[0]
-    assert topic == Topic.APPROVED_OPPORTUNITIES
+    approved = [p for p in pub.published if p[0] == Topic.APPROVED_OPPORTUNITIES]
+    assert len(approved) == 1
+    _, payload, _attrs = approved[0]
     assert payload.execute is True
     assert payload.id == "o-bridge"
+
+    # AI Phase A: an approved opportunity also emits a RiskDecision fact.
+    decisions = [p for p in pub.published if p[0] == Topic.RISK_DECISIONS]
+    assert len(decisions) == 1
+    assert decisions[0][1].approved is True
+    assert decisions[0][1].opportunity_id == "o-bridge"
 
 
 def test_rejected_opportunity_is_not_forwarded(fake_redis, monkeypatch):
@@ -83,8 +89,15 @@ def test_rejected_opportunity_is_not_forwarded(fake_redis, monkeypatch):
     msg = _FakeMessage(_opp(size_usd=10_000.0))
     main._on_opportunity(msg)
 
-    assert msg.acked              # acked (handled), but nothing forwarded
-    assert pub.published == []
+    assert msg.acked              # acked (handled), but nothing forwarded for execution
+    assert [p for p in pub.published if p[0] == Topic.APPROVED_OPPORTUNITIES] == []
+
+    # AI Phase A: rejects are still captured as facts (the negatives ML needs).
+    decisions = [p for p in pub.published if p[0] == Topic.RISK_DECISIONS]
+    assert len(decisions) == 1
+    decision = decisions[0][1]
+    assert decision.approved is False
+    assert decision.violation_rules  # at least the per-trade size limit fired
 
 
 def test_evaluate_and_forward_returns_none_when_rejected(fake_redis):
@@ -124,5 +137,6 @@ def test_advisory_rank_failure_is_fail_open(fake_redis, monkeypatch):
     msg = _FakeMessage(_opp())
     main._on_opportunity(msg)
     assert msg.acked
-    assert len(pub.published) == 1
-    assert "rank_action" not in pub.published[0][2]
+    approved = [p for p in pub.published if p[0] == Topic.APPROVED_OPPORTUNITIES]
+    assert len(approved) == 1
+    assert "rank_action" not in approved[0][2]

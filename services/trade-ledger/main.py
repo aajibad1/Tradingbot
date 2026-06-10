@@ -29,6 +29,7 @@ import writer
 from shared.models.exchange_tick import ExchangeTick
 from shared.models.funding_rate import FundingRate
 from shared.models.opportunity import Opportunity
+from shared.models.risk_decision import RiskDecision
 from shared.models.trade import Trade
 from tax_export import export_funding_income_year, export_year
 from tick_collector import TickBuffer
@@ -61,6 +62,7 @@ def _start_subscribers() -> None:
     _subscribe(project_id, "arb-opportunities-ledger", _on_opportunity)
     _subscribe(project_id, "arb-funding-rates-ledger", _on_funding)
     _subscribe(project_id, "arb-risk-alerts-ledger", _on_risk_alert)
+    _subscribe(project_id, "arb-risk-decisions-ledger", _on_risk_decision)
     _subscribe(project_id, "arb-audit-log-ledger", _on_audit_log)
 
     # Forward tick collection (opt-in) — high-volume, downsampled + batched,
@@ -117,6 +119,16 @@ def _on_risk_alert(message) -> None:
         message.ack()
     except Exception:
         logger.exception("failed to write risk alert")
+        message.nack()
+
+
+def _on_risk_decision(message) -> None:
+    try:
+        decision = RiskDecision(**json.loads(message.data.decode("utf-8")))
+        writer.write_risk_decision(decision)
+        message.ack()
+    except Exception:
+        logger.exception("failed to write risk decision")
         message.nack()
 
 

@@ -25,6 +25,7 @@ from writer import (
     funding_to_row,
     opportunity_to_row,
     risk_alert_to_row,
+    risk_decision_to_row,
     tick_to_row,
     trade_to_row,
 )
@@ -32,6 +33,7 @@ from writer import (
 from shared.models.exchange_tick import ExchangeTick
 from shared.models.funding_rate import FundingRate
 from shared.models.opportunity import Opportunity, StrategyType
+from shared.models.risk_decision import RiskDecision
 from shared.models.trade import Trade, TradeLeg, TradeStatus, TradeType
 
 _SCHEMA_DIR = Path(__file__).resolve().parent.parent / "schema"
@@ -144,6 +146,19 @@ def _audit_row() -> dict:
     })
 
 
+def _risk_decision_row() -> dict:
+    return risk_decision_to_row(RiskDecision(
+        decision_id="o1:rd", opportunity_id="o1", tenant_id="t1",
+        strategy=StrategyType.FUNDING_RATE_ARB, asset="BTC",
+        long_exchange="kraken", short_exchange="hyperliquid", directional=False,
+        net_edge_bps=60.0, gross_spread_bps=0.0, trading_fees_bps=31.0,
+        slippage_estimate_bps=4.0, funding_rate_annualized_pct=15.0,
+        confidence_score=0.7, recommended_size_usd=10_000.0,
+        approved=True, kill_switch_active=False, violation_rules=[],
+        decided_at=datetime(2026, 1, 1),
+    ))
+
+
 def _tick_row() -> dict:
     return tick_to_row(ExchangeTick(
         exchange="kraken", symbol="BTC/USD", asset="BTC", bid=60_000.0, ask=60_010.0,
@@ -156,6 +171,7 @@ _CASES = {
     "opportunities.sql": _opportunity_row,
     "funding_events.sql": _funding_row,
     "risk_events.sql": _risk_event_row,
+    "risk_decisions.sql": _risk_decision_row,
     "audit_log.sql": _audit_row,
     "ticks.sql": _tick_row,
 }

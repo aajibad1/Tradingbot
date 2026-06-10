@@ -24,6 +24,7 @@ def test_topic_values_are_stable() -> None:
     assert Topic.FUNDING_RATES.value == "arb-funding-rates"
     assert Topic.OPPORTUNITIES.value == "arb-opportunities"
     assert Topic.RISK_ALERTS.value == "arb-risk-alerts"
+    assert Topic.RISK_DECISIONS.value == "arb-risk-decisions"
     assert Topic.TRADE_FILLS.value == "arb-trade-fills"
     assert Topic.AI_PROPOSALS.value == "arb-ai-proposals"
     assert Topic.AUDIT_LOG.value == "arb-audit-log"
