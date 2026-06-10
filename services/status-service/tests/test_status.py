@@ -55,3 +55,47 @@ def test_targets_parsing(monkeypatch):
     targets = {n: (url, crit) for n, url, crit in main._targets()}
     assert targets["risk-engine"] == ("http://risk:8080/healthz", True)
     assert targets["core-api"] == ("http://core:8080/healthz", False)
+
+
+def test_slo_catalog_endpoint_lists_documented_targets():
+    from fastapi.testclient import TestClient
+    client = TestClient(main.app)
+    body = client.get("/slo/catalog").json()
+    names = {s["name"] for s in body["slos"]}
+    assert "control_plane_availability" in names
+    assert all("objective" in s for s in body["slos"])
+
+
+def test_slo_evaluate_ok_returns_200():
+    from fastapi.testclient import TestClient
+    client = TestClient(main.app)
+    r = client.post("/slo/evaluate", json={"observations": {
+        "control_plane_availability": [1000, 1000],
+    }})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["worst_severity"] == "ok"
+    assert body["slos"]["control_plane_availability"]["breaching"] is False
+
+
+def test_slo_evaluate_fast_burn_trips_503():
+    from fastapi.testclient import TestClient
+    client = TestClient(main.app)
+    # 2% failure against a 99.9% objective → ~20x burn → PAGE → 503.
+    r = client.post("/slo/evaluate", json={"observations": {
+        "control_plane_availability": [980, 1000],
+    }})
+    assert r.status_code == 503
+    assert r.json()["worst_severity"] == "page"
+
+
+def test_slo_evaluate_ignores_malformed_and_unknown():
+    from fastapi.testclient import TestClient
+    client = TestClient(main.app)
+    r = client.post("/slo/evaluate", json={"observations": {
+        "control_plane_availability": [999, 1000],
+        "not_a_slo": [1, 1],
+        "malformed": [5],
+    }})
+    assert r.status_code == 200
+    assert set(r.json()["slos"]) == {"control_plane_availability"}

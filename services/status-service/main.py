@@ -9,8 +9,10 @@ Config (env):
   STATUS_NONCRITICAL        — comma list of target names that only DEGRADE (not DOWN)
 
 Endpoints:
-  GET /healthz   — this service's own liveness
-  GET /status    — aggregated platform status
+  GET  /healthz      — this service's own liveness
+  GET  /status       — aggregated platform status
+  GET  /slo/catalog  — documented SLO targets (machine-readable)
+  POST /slo/evaluate — error-budget + burn-rate verdict for observed counts
 """
 
 from __future__ import annotations
@@ -20,8 +22,10 @@ import os
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from shared.health import Component, HealthStatus, build_report, run_check
+from shared.slo import DEFAULT_SLOS, SLOSeverity, evaluate_all, worst_severity
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("status-service")
@@ -79,3 +83,39 @@ def status() -> JSONResponse:
     # Surface unhealthy platform as a 503 so external uptime monitors trip.
     code = 200 if report.status is HealthStatus.OK else 503
     return JSONResponse(report.to_dict(), status_code=code)
+
+
+@app.get("/slo/catalog")
+def slo_catalog() -> dict:
+    """The documented SLO targets, in machine-readable form (single source of truth
+    in shared/slo.py:DEFAULT_SLOS, mirroring docs/SLOS.md)."""
+    return {
+        "slos": [
+            {"name": t.name, "objective": t.objective,
+             "window_days": t.window_days, "description": t.description}
+            for t in DEFAULT_SLOS.values()
+        ]
+    }
+
+
+class SLOEvaluateRequest(BaseModel):
+    # name → [good, total] observed over the SLO window. A metrics job (BigQuery
+    # event lag, probe history) supplies these; the math is in shared/slo.py.
+    observations: dict[str, list[int]] = Field(default_factory=dict)
+
+
+@app.post("/slo/evaluate")
+def slo_evaluate(req: SLOEvaluateRequest) -> JSONResponse:
+    """Evaluate observed good/total counts against the SLO catalog.
+
+    Returns each SLO's error-budget position + burn-rate severity, rolled up to a
+    worst-severity. A PAGE-level burn returns 503 (same semantics as /status — it
+    trips external monitors); ticket/ok return 200.
+    """
+    obs = {k: (v[0], v[1]) for k, v in req.observations.items() if len(v) == 2}
+    statuses = evaluate_all(obs)
+    worst = worst_severity(statuses)
+    code = 503 if worst is SLOSeverity.PAGE else 200
+    return JSONResponse(
+        {"worst_severity": worst.value, "slos": statuses}, status_code=code
+    )
