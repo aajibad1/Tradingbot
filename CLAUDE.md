@@ -42,6 +42,8 @@ services/
   # Platform services
   sentiment-service/  notification-dispatcher/  fx-rate-service/  dashboard-api/  ai-ops-agent/
   approval-gate-service/   AI permission-model gate (read→auto, sensitive→human, withdrawals→blocked); audit (docs/10)
+  agent-registry/          Agents + immutable prompt/model versions; activation gated on passing eval (docs/10)
+  agent-evals/             Eval harness (accuracy/hallucination/latency) + promotion verdicts (docs/10)
 apps/
   frontend/                Next.js (App Router): onboarding stepper + dashboard → core-api
 shared/
@@ -125,6 +127,8 @@ PYTHONPATH=.:services/public-api-gateway   python3 -m pytest services/public-api
 PYTHONPATH=.:services/developer-portal     python3 -m pytest services/developer-portal/tests/ -v
 PYTHONPATH=.:services/admin-console        python3 -m pytest services/admin-console/tests/ -v
 PYTHONPATH=.:services/approval-gate-service python3 -m pytest services/approval-gate-service/tests/ -v
+PYTHONPATH=.:services/agent-registry       python3 -m pytest services/agent-registry/tests/ -v
+PYTHONPATH=.:services/agent-evals          python3 -m pytest services/agent-evals/tests/ -v
 
 # All services in one run (note PYTHONPATH order)
 PYTHONPATH=.:services/risk-engine:services/paper-trader:services/market-data:services/funding-rate-service \
