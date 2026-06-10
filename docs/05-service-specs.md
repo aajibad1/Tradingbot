@@ -163,7 +163,8 @@ trading wedge under slightly different names. Status: ✅ built · 🟡 partial/
 | Blueprint | Repo | Status |
 |---|---|---|
 | web-frontend | `apps/frontend` (Next.js) | ✅ |
-| developer-portal / admin-console / public-api-gateway | — (`services/dashboard-api` is a partial ops API) | ❌ / 🟡 |
+| public-api-gateway | `services/public-api-gateway` | ✅ authenticated (partner-auth) + metered (api-metering) proxy to the API plane |
+| developer-portal / admin-console | — (`services/dashboard-api` is a partial ops API) | ❌ / 🟡 |
 
 ### API plane (live rails gated on licensing — see docs/REGULATORY_BRIEF.md)
 | Blueprint | Repo | Status |
