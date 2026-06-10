@@ -20,6 +20,8 @@ services/
   opportunity-ranker/      AI advisory ranking (never gates; risk-engine calls it fail-open)
   # Execution plane — Africa market (FX/stablecoin corridors), alert-only
   corridor-engine/         Scores corridors w/ settlement risk → arb-corridor-alerts
+  # API plane — partner orchestration (docs/05–06). SANDBOX only; live rails gated on licensing.
+  onramp-orchestrator/     Fiat→stablecoin on-ramp (sandbox simulator); contract+envelope+idempotency
   # Control plane — multi-tenant SaaS (Cloud SQL Postgres)
   core-api/                Identity/tenant/RBAC, onboarding state machine, Stripe billing→entitlements,
                            live-enable gate (perm×plan×onboarding×funding), audit, funding, dashboard,
@@ -96,6 +98,7 @@ PYTHONPATH=.:services/core-api             python3 -m pytest services/core-api/t
 PYTHONPATH=.:services/accounts-service     python3 -m pytest services/accounts-service/tests/ -v
 PYTHONPATH=.:services/corridor-engine      python3 -m pytest services/corridor-engine/tests/ -v
 PYTHONPATH=.:services/opportunity-ranker   python3 -m pytest services/opportunity-ranker/tests/ -v
+PYTHONPATH=.:services/onramp-orchestrator  python3 -m pytest services/onramp-orchestrator/tests/ -v
 
 # All services in one run (note PYTHONPATH order)
 PYTHONPATH=.:services/risk-engine:services/paper-trader:services/market-data:services/funding-rate-service \

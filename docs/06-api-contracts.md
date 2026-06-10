@@ -103,8 +103,10 @@ The cross-cutting parts of this contract are implemented in `shared/http/`:
 - idempotency-key store for write ops — `shared/http/idempotency.py`
 - one-line wiring — `from shared.http import install_contract; install_contract(app, service_name=...)`
 
-Adopted so far: `status-service`. New API-plane services should `install_contract`
-on startup. The per-endpoint OpenAPI definitions below remain to be expanded.
+Adopted so far: `status-service`, `execution-orchestrator`, `onramp-orchestrator`
+(the last one also exercises the Idempotency-Key store + `Status` taxonomy on its
+on-ramp endpoints). New API-plane services should `install_contract` on startup.
+The per-endpoint OpenAPI definitions below remain to be expanded.
 
 ## Contract requirements
 Claude should expand this into full OpenAPI-ready endpoint definitions with request/response examples, error cases, and webhook examples.
