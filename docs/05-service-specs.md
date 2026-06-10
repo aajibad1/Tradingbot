@@ -168,15 +168,19 @@ trading wedge under slightly different names. Status: ✅ built · 🟡 partial/
 ### API plane (live rails gated on licensing — see docs/REGULATORY_BRIEF.md)
 | Blueprint | Repo | Status |
 |---|---|---|
-| onramp-orchestrator | `services/onramp-orchestrator` | 🟡 **SANDBOX only** (deterministic simulator; live rails gated) |
-| offramp-orchestrator / settlement-status / partner-auth / api-metering / tenant-billing / partner-webhook | — | ❌ not started |
+| onramp-orchestrator | `services/onramp-orchestrator` | 🟡 **SANDBOX only** (fiat→stable; `funding.*` events) |
+| offramp-orchestrator | `services/offramp-orchestrator` | 🟡 **SANDBOX only** (stable→fiat; `payout.*` events) |
+| settlement-status | `services/settlement-status` | ✅ read model — projects funding+payout → normalized settlement |
+| partner-auth / api-metering / tenant-billing / partner-webhook | — | ❌ not started |
 
-`onramp-orchestrator` is the doc-sanctioned sandbox-first build (docs/06 sandbox
-tier): it exercises the full platform contract end to end — `install_contract`
-(correlation + error model), Idempotency-Key on create, the `Status` taxonomy for
-the order lifecycle, and `funding.*` events via the canonical envelope. No real
-money moves; `sandbox_provider.assert_sandbox_only()` fails loud if pointed at a
-real provider before licensing clears.
+The on/off-ramp orchestrators are the doc-sanctioned sandbox-first build (docs/06
+sandbox tier): each exercises the full platform contract end to end —
+`install_contract` (correlation + error model), Idempotency-Key on create, the
+`Status` taxonomy for the order lifecycle, and lifecycle events via the canonical
+envelope (`Topic.FUNDING_EVENTS` / `Topic.PAYOUT_EVENTS`). No real money moves;
+`assert_sandbox_only()` fails loud (503) if pointed at a real provider before
+licensing clears. `settlement-status` consumes both event streams and projects one
+normalized settlement record per order (docs/05 "normalized statuses across providers").
 
 ### Agent services
 | Blueprint | Repo | Status |

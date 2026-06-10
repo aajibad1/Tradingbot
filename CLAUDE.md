@@ -21,7 +21,9 @@ services/
   # Execution plane — Africa market (FX/stablecoin corridors), alert-only
   corridor-engine/         Scores corridors w/ settlement risk → arb-corridor-alerts
   # API plane — partner orchestration (docs/05–06). SANDBOX only; live rails gated on licensing.
-  onramp-orchestrator/     Fiat→stablecoin on-ramp (sandbox simulator); contract+envelope+idempotency
+  onramp-orchestrator/     Fiat→stablecoin on-ramp (sandbox simulator) → funding-events
+  offramp-orchestrator/    Stablecoin→fiat payout (sandbox simulator) → payout-events
+  settlement-status/       Read model: projects funding+payout events → normalized settlement
   # Control plane — multi-tenant SaaS (Cloud SQL Postgres)
   core-api/                Identity/tenant/RBAC, onboarding state machine, Stripe billing→entitlements,
                            live-enable gate (perm×plan×onboarding×funding), audit, funding, dashboard,
@@ -99,6 +101,8 @@ PYTHONPATH=.:services/accounts-service     python3 -m pytest services/accounts-s
 PYTHONPATH=.:services/corridor-engine      python3 -m pytest services/corridor-engine/tests/ -v
 PYTHONPATH=.:services/opportunity-ranker   python3 -m pytest services/opportunity-ranker/tests/ -v
 PYTHONPATH=.:services/onramp-orchestrator  python3 -m pytest services/onramp-orchestrator/tests/ -v
+PYTHONPATH=.:services/offramp-orchestrator python3 -m pytest services/offramp-orchestrator/tests/ -v
+PYTHONPATH=.:services/settlement-status    python3 -m pytest services/settlement-status/tests/ -v
 
 # All services in one run (note PYTHONPATH order)
 PYTHONPATH=.:services/risk-engine:services/paper-trader:services/market-data:services/funding-rate-service \
