@@ -211,8 +211,13 @@ normalized settlement record per order (docs/05 "normalized statuses across prov
 | debate-session-service | `services/debate-service` (proposer→skeptic→judge) | ✅ |
 | research-session-service | `services/corridor-intelligence-service`, `services/sentiment-service` (Perplexity) | 🟡 |
 | policy-enforcement-service | `services/risk-engine` (deterministic gate, sole authority) | ✅ |
-| approval-gate-service | partial in `services/ai-ops-agent` (propose→Slack-approve) | 🟡 |
-| agent-orchestrator / agent-memory / agent-registry / prompt-version-registry / agent-evals | — | ❌ |
+| approval-gate-service | `services/approval-gate-service` | ✅ enforces the AI permission model (read→auto, sensitive→human, withdrawals/leverage→hard-blocked); audit + model/prompt versioning |
+| agent-orchestrator / agent-memory / agent-registry / prompt-version-registry / agent-evals | — | ❌ (gated: build only once the advisory loop is proven live) |
+
+> The approval-gate is a **safety control, not an executor** — it returns a verdict
+> an executor must honor; it never performs the action. Building the brake before
+> the engine is the doc-10 prerequisite for any live AI. The autonomous
+> orchestration mesh stays gated until the advisory loop is proven (docs/10).
 
 Plus repo services with no direct blueprint row: `opportunity-ranker` (advisory ranking),
 `accounts-service` (internal double-entry ledger), `signal-replay-service` (replay tooling),

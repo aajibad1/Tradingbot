@@ -36,5 +36,15 @@ Defines how the multi-agent system behaves safely in production.
 - post-outcome analysis against realized results
 - red-team prompts and prompt injection tests
 
+## Implemented
+- **Approval gating + permission model** — `services/approval-gate-service`: classifies
+  every proposed agent action (read→auto, sensitive→human approval, withdrawals/
+  leverage→hard-blocked), records model_version/prompt_version/evidence, and emits an
+  audit event per proposal + decision. It is a safety control, never an executor.
+- **Deterministic policy enforcement** — `services/risk-engine` (the sole final authority).
+
+Still to build (gated — only once the advisory loop is proven live): agent
+orchestrator, scoped agent-memory, agent-registry, prompt-version-registry, eval harness.
+
 ## Expansion task
 Claude should implement the agent control plane, audit trail, eval harness, and approval gating consistent with this document.
