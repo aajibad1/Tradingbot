@@ -31,7 +31,7 @@ from shared.models.funding_rate import FundingRate
 from shared.models.opportunity import Opportunity
 from shared.models.risk_decision import RiskDecision
 from shared.models.trade import Trade
-from ml_export import export_training_rows
+from ml_export import export_training_rows, fetch_training_rows, score_advisory
 from tax_export import export_funding_income_year, export_year
 from tick_collector import TickBuffer
 
@@ -255,3 +255,23 @@ def ml_export_decisions(
             "Content-Disposition": f'attachment; filename="risk_decisions_{start}_{end}.csv"'
         },
     )
+
+
+@app.get("/ml-export/advisory-scorecard")
+def ml_advisory_scorecard(
+    start: str = Query(pattern=_ISO_DATE, description="Inclusive start date YYYY-MM-DD"),
+    end: str = Query(pattern=_ISO_DATE, description="Exclusive end date YYYY-MM-DD"),
+) -> dict:
+    """Grade the AI advisory ranker against realized outcomes over [start, end).
+
+    Returns hit-rate / precision / lift / Brier calibration vs the no-skill base
+    rate (see ``ml_export.score_advisory``). This is the evidence gate for the
+    advisory layer: lift > 1 and a falling Brier are what justify leaning on it
+    (or scaling the agent mesh) — the risk-engine remains the sole authority
+    regardless.
+    """
+    try:
+        scorecard = score_advisory(fetch_training_rows(start, end))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return {"window": {"start": start, "end": end}, "advisory": scorecard}

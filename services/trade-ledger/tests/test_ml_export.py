@@ -8,7 +8,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ml_export import _COLUMNS, export_training_rows, label_training_row
+from ml_export import (
+    _COLUMNS,
+    export_training_rows,
+    label_training_row,
+    score_advisory,
+)
 
 
 def _decision_features(**over) -> dict:
@@ -63,6 +68,43 @@ def test_label_row_keys_match_csv_columns() -> None:
 def test_export_raises_without_gcp_project() -> None:
     with patch("ml_export._PROJECT", None), pytest.raises(RuntimeError):
         export_training_rows("2026-01-01", "2026-02-01")
+
+
+def _labelled(p: float | None, profitable: bool | None, executed: bool = True) -> dict:
+    """A training row as label_training_row would produce, for scoring tests."""
+    return {"was_executed": executed, "advisory_probability": p, "label_profitable": profitable}
+
+
+def test_score_advisory_empty_when_nothing_graded() -> None:
+    # Rejected (unexecuted) rows have no realized label → not graded.
+    sc = score_advisory([_labelled(0.9, None, executed=False)])
+    assert sc["n"] == 0 and sc["base_rate"] is None and sc["brier"] is None
+
+
+def test_score_advisory_perfect_predictor() -> None:
+    rows = [_labelled(1.0, True), _labelled(0.0, False),
+            _labelled(0.9, True), _labelled(0.1, False)]
+    sc = score_advisory(rows)
+    assert sc["n"] == 4
+    assert sc["base_rate"] == 0.5
+    assert sc["hit_rate"] == 1.0
+    assert sc["precision"] == 1.0
+    assert sc["lift"] == 2.0          # precision 1.0 / base 0.5
+    assert sc["brier"] < 0.05         # near-perfect calibration
+
+
+def test_score_advisory_ignores_rows_without_prediction_or_label() -> None:
+    rows = [_labelled(None, True), _labelled(0.8, None), _labelled(0.8, True)]
+    sc = score_advisory(rows)
+    assert sc["n"] == 1               # only the fully-populated row counts
+
+
+def test_score_advisory_coin_flip_has_unit_lift() -> None:
+    # Predictor always says 0.6 ("profitable"); half actually win → no skill.
+    rows = [_labelled(0.6, True), _labelled(0.6, False)]
+    sc = score_advisory(rows)
+    assert sc["precision"] == 0.5 and sc["base_rate"] == 0.5
+    assert sc["lift"] == 1.0
 
 
 @patch("ml_export._bq_client")

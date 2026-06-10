@@ -99,13 +99,13 @@ def label_training_row(row) -> dict:
     }
 
 
-def export_training_rows(start_date: str, end_date: str) -> str:
-    """Return CSV training rows for decisions made in [start_date, end_date).
+def fetch_training_rows(start_date: str, end_date: str) -> list[dict]:
+    """Labelled training rows for decisions made in [start_date, end_date).
 
     Dates are ISO ``YYYY-MM-DD`` (partition pruning on ``decided_at``). Only
     ``live`` trades supply realized labels — paper fills are excluded from the
     join so the label reflects real money (paper PnL is simulator output, not a
-    ground-truth outcome).
+    ground-truth outcome). Each row is the output of :func:`label_training_row`.
     """
     if not _PROJECT:
         raise RuntimeError("GCP_PROJECT_ID unset")
@@ -152,10 +152,63 @@ def export_training_rows(start_date: str, end_date: str) -> str:
             ]
         ),
     )
+    return [label_training_row(row) for row in job.result()]
 
+
+def export_training_rows(start_date: str, end_date: str) -> str:
+    """CSV rendering of :func:`fetch_training_rows` (stable ``_COLUMNS`` order)."""
     buf = StringIO()
     writer = csv.DictWriter(buf, fieldnames=_COLUMNS)
     writer.writeheader()
-    for row in job.result():
-        writer.writerow(label_training_row(row))
+    for row in fetch_training_rows(start_date, end_date):
+        writer.writerow(row)
     return buf.getvalue()
+
+
+def score_advisory(rows) -> dict:
+    """Measure the advisory ranker against realized outcomes (AI Phase B seed).
+
+    The risk-engine records the opportunity-ranker's ``advisory_probability`` at
+    decision time; the label loop later attaches the realized ``label_profitable``.
+    This compares the two over EXECUTED decisions that carry both — the only rows
+    with a ground-truth outcome AND a prediction to grade. Pure: a list of training
+    rows in, a metrics dict out.
+
+    Metrics:
+      - ``n``            graded rows (executed, has advisory_probability + label)
+      - ``base_rate``    realized win rate (the no-skill baseline)
+      - ``hit_rate``     accuracy treating p>=0.5 as "predict profitable"
+      - ``precision``    win rate among advisory-positive (p>=0.5) calls
+      - ``lift``         precision / base_rate  (>1 means the model beats chance)
+      - ``brier``        mean (p - y)^2 calibration error (lower is better)
+    """
+    graded = [
+        r for r in rows
+        if r.get("was_executed")
+        and r.get("advisory_probability") is not None
+        and r.get("label_profitable") is not None
+    ]
+    n = len(graded)
+    if n == 0:
+        return {"n": 0, "base_rate": None, "hit_rate": None,
+                "precision": None, "lift": None, "brier": None}
+
+    wins = sum(1 for r in graded if r["label_profitable"])
+    base_rate = wins / n
+    hits = sum(1 for r in graded
+               if (r["advisory_probability"] >= 0.5) == bool(r["label_profitable"]))
+    hit_rate = hits / n
+    positives = [r for r in graded if r["advisory_probability"] >= 0.5]
+    precision = (sum(1 for r in positives if r["label_profitable"]) / len(positives)
+                 if positives else None)
+    lift = (precision / base_rate) if (precision is not None and base_rate > 0) else None
+    brier = sum((r["advisory_probability"] - (1.0 if r["label_profitable"] else 0.0)) ** 2
+                for r in graded) / n
+    return {
+        "n": n,
+        "base_rate": round(base_rate, 4),
+        "hit_rate": round(hit_rate, 4),
+        "precision": round(precision, 4) if precision is not None else None,
+        "lift": round(lift, 4) if lift is not None else None,
+        "brier": round(brier, 4),
+    }
