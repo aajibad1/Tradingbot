@@ -115,6 +115,31 @@ class EventPublisher:
             attributes={"source": source, "event": event},
         )
 
+    def publish_event(
+        self,
+        topic: Topic,
+        event_type: str,
+        payload: BaseModel | dict,
+        *,
+        producer: str,
+        tenant_id: str | None = None,
+        correlation_id: str | None = None,
+        version: int = 1,
+    ) -> str:
+        """Publish a payload wrapped in the canonical event envelope (docs/07).
+
+        Opt-in alternative to :meth:`publish` for new event flows: the message
+        data is the full ``EventEnvelope`` JSON, and the envelope's metadata
+        (event_type / producer / correlation_id / tenant) is mirrored into Pub/Sub
+        attributes for filtering. Returns the message id."""
+        from shared.models.event_envelope import EventEnvelope
+
+        env = EventEnvelope.wrap(
+            event_type=event_type, payload=payload, producer=producer,
+            tenant_id=tenant_id, correlation_id=correlation_id, version=version,
+        )
+        return self.publish(topic, env, attributes=env.attributes())
+
 
 class NullPublisher:
     """Stand-in for local/dev runs without GCP credentials. Logs to stdout."""
@@ -144,6 +169,26 @@ class NullPublisher:
 
     def publish_audit(self, source: str, event: str, payload: BaseModel) -> str:
         return self.publish(Topic.AUDIT_LOG, payload, {"source": source, "event": event})
+
+    def publish_event(
+        self,
+        topic: Topic,
+        event_type: str,
+        payload: BaseModel | dict,
+        *,
+        producer: str,
+        tenant_id: str | None = None,
+        correlation_id: str | None = None,
+        version: int = 1,
+    ) -> str:
+        """Local mirror of :meth:`EventPublisher.publish_event` (logs to stdout)."""
+        from shared.models.event_envelope import EventEnvelope
+
+        env = EventEnvelope.wrap(
+            event_type=event_type, payload=payload, producer=producer,
+            tenant_id=tenant_id, correlation_id=correlation_id, version=version,
+        )
+        return self.publish(topic, env, attributes=env.attributes())
 
 
 def pubsub_project_id() -> str | None:
