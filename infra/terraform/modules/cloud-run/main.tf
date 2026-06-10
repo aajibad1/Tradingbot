@@ -11,8 +11,10 @@ terraform {
 # Dedicated least-privilege service account per Cloud Run service
 # ---------------------------------------------------------------------------
 resource "google_service_account" "svc" {
-  project      = var.project_id
-  account_id   = "sa-${var.service_name}"
+  project = var.project_id
+  # GCP account_id must be 6-30 chars and not end in '-'. Long service names (e.g.
+  # corridor-intelligence-service) overflow "sa-<name>", so bound + trim safely.
+  account_id   = trimsuffix(substr("sa-${var.service_name}", 0, 30), "-")
   display_name = "Cloud Run SA for ${var.service_name}"
 }
 
