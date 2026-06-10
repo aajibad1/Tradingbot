@@ -177,10 +177,16 @@ trading wedge under slightly different names. Status: ✅ built · 🟡 partial/
 | tenant-billing | `services/tenant-billing` | ✅ usage→invoices (plan base + overage lines); issue/pay; billing.* events |
 
 The sandbox API plane is now complete end to end: **partner-auth** (keys) →
-**onramp/offramp** (ramps) → **settlement-status** (normalized view) →
-**webhook-service** (signed partner notifications) → **api-metering** (usage) →
-**tenant-billing** (invoices). All on the shared contract + envelope, sandbox-
-guarded, locally tested. Live rails + production keys remain gated on licensing.
+**routing-service** (best provider/corridor) → **onramp/offramp** (ramps) →
+**settlement-status** (normalized view) → **webhook-service** (signed partner
+notifications) → **api-metering** (usage) → **tenant-billing** (invoices). All on
+the shared contract + envelope, sandbox-guarded, locally tested. Live rails +
+production keys remain gated on licensing.
+
+`routing-service` (`services/routing-service`, docs/06 Routing) resolves the best
+provider/corridor for a transfer by objective (lowest cost / fastest settlement)
+over a sandbox provider catalog; advisory (moves no money), real connectors slot
+in behind the same interface later.
 
 The on/off-ramp orchestrators are the doc-sanctioned sandbox-first build (docs/06
 sandbox tier): each exercises the full platform contract end to end —
