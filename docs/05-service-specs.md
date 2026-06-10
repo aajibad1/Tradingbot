@@ -174,7 +174,13 @@ trading wedge under slightly different names. Status: ✅ built · 🟡 partial/
 | partner-webhook | `services/webhook-service` | ✅ HMAC-signed delivery of funding/payout events; rotate-secret + replay |
 | partner-auth | `services/partner-auth` | ✅ API-key issue/verify/rotate/revoke; secrets hashed; prod keys gated |
 | api-metering | `services/api-metering` | ✅ per-tenant usage by route/period; quotas + soft overage |
-| tenant-billing | — | ❌ not started |
+| tenant-billing | `services/tenant-billing` | ✅ usage→invoices (plan base + overage lines); issue/pay; billing.* events |
+
+The sandbox API plane is now complete end to end: **partner-auth** (keys) →
+**onramp/offramp** (ramps) → **settlement-status** (normalized view) →
+**webhook-service** (signed partner notifications) → **api-metering** (usage) →
+**tenant-billing** (invoices). All on the shared contract + envelope, sandbox-
+guarded, locally tested. Live rails + production keys remain gated on licensing.
 
 The on/off-ramp orchestrators are the doc-sanctioned sandbox-first build (docs/06
 sandbox tier): each exercises the full platform contract end to end —
