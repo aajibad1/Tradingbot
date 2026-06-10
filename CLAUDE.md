@@ -98,7 +98,9 @@ End-to-end local smokes (no GCP):
 `./scripts/failover_smoke.sh` (status-service ok→degraded→down semantics under
 killed dependencies — reliability #1), and
 `./scripts/api_plane_smoke.sh` (sandbox API plane: partner-auth→gateway→{routing,
-onramp,wallet}; auth→scope→meter→proxy). All use only indexed bash arrays (macOS bash 3.2).
+onramp,wallet}; auth→scope→meter→proxy), and
+`./scripts/governance_smoke.sh` (agent governance: permission model + eval-gated
+promotion across approval-gate/agent-registry/agent-evals). All use only indexed bash arrays (macOS bash 3.2).
 Frontend: `cd apps/frontend && npm install && npm run dev` (needs core-api on :8080).
 
 ## Running tests
