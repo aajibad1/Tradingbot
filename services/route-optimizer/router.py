@@ -9,7 +9,12 @@ the order. Deterministic first; a learned route-quality model can replace
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+
+# Minimum realized fills on a venue before its calibration is trusted. Below this
+# the realized slippage gap is too noisy to act on, so the modeled estimate stands
+# (cold-start: a new venue is ranked on its model priors until it has a track record).
+MIN_CALIBRATION_FILLS = 5
 
 
 @dataclass
@@ -59,6 +64,37 @@ def score_route(c: RouteCandidate) -> RankedRoute:
     )
 
 
-def rank_routes(candidates: list[RouteCandidate]) -> RouteRanking:
-    ranked = sorted((score_route(c) for c in candidates), key=lambda r: r.score, reverse=True)
+def apply_calibration(
+    candidates: list[RouteCandidate], route_quality: dict | None
+) -> list[RouteCandidate]:
+    """Correct each candidate's ``est_slippage_bps`` from realized fills.
+
+    ``route_quality`` is the report emitted by the trade-ledger
+    ``/ml-export/route-quality`` endpoint (``exec_quality.summarize_route_quality``).
+    For a venue with at least ``MIN_CALIBRATION_FILLS`` realized fills, the modeled
+    estimate is shifted by that venue's realized ``slippage_gap_bps`` (realized −
+    modeled) and floored at 0 — closing the loop so the optimizer ranks on observed
+    behaviour, not priors. Venues below the sample threshold (or absent from the
+    report) are left untouched. Pure: returns a new list, never mutates inputs.
+    """
+    if not route_quality:
+        return candidates
+    venues = route_quality.get("venues", {})
+    out: list[RouteCandidate] = []
+    for c in candidates:
+        v = venues.get(c.venue)
+        if v and v.get("n_fills", 0) >= MIN_CALIBRATION_FILLS:
+            corrected = max(0.0, c.est_slippage_bps + v["slippage_gap_bps"])
+            out.append(replace(c, est_slippage_bps=round(corrected, 2)))
+        else:
+            out.append(c)
+    return out
+
+
+def rank_routes(
+    candidates: list[RouteCandidate], route_quality: dict | None = None
+) -> RouteRanking:
+    """Rank routes, optionally correcting slippage priors with realized calibration."""
+    calibrated = apply_calibration(candidates, route_quality)
+    ranked = sorted((score_route(c) for c in calibrated), key=lambda r: r.score, reverse=True)
     return RouteRanking(recommended_route=ranked[0].venue if ranked else None, routes=ranked)

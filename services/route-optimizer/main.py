@@ -26,6 +26,10 @@ class CandidateIn(BaseModel):
 
 class RankRequest(BaseModel):
     candidates: list[CandidateIn]
+    # Optional realized-slippage calibration: the report from the trade-ledger
+    # /ml-export/route-quality endpoint. When present, venue slippage priors are
+    # corrected from observed fills before ranking (cold-start venues untouched).
+    route_quality: dict | None = None
 
 
 @app.get("/healthz")
@@ -35,5 +39,8 @@ def healthz() -> dict[str, str]:
 
 @app.post("/rank")
 def rank(req: RankRequest) -> dict:
-    ranking = rank_routes([RouteCandidate(**c.model_dump()) for c in req.candidates])
+    ranking = rank_routes(
+        [RouteCandidate(**c.model_dump()) for c in req.candidates],
+        route_quality=req.route_quality,
+    )
     return asdict(ranking)

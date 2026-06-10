@@ -36,3 +36,60 @@ def test_rank_recommends_best_and_sorts():
 def test_empty_candidates():
     r = rank_routes([])
     assert r.recommended_route is None and r.routes == []
+
+
+def _report(venue, gap_bps, n_fills):
+    return {"venues": {venue: {"n_fills": n_fills, "slippage_gap_bps": gap_bps,
+                               "avg_realized_slippage_bps": 0.0,
+                               "avg_modeled_slippage_bps": 0.0,
+                               "total_notional_usd": 0.0}}}
+
+
+def test_calibration_worsens_a_venue_that_fills_worse_than_modeled():
+    # kraken realized 6 bps worse than modeled, with enough fills to trust it.
+    from router import apply_calibration
+    [c] = apply_calibration([_c("kraken", est_slippage_bps=4.0)], _report("kraken", 6.0, 50))
+    assert c.est_slippage_bps == 10.0
+
+
+def test_calibration_floored_at_zero():
+    from router import apply_calibration
+    [c] = apply_calibration([_c("kraken", est_slippage_bps=2.0)], _report("kraken", -9.0, 50))
+    assert c.est_slippage_bps == 0.0
+
+
+def test_calibration_ignored_below_sample_threshold():
+    from router import apply_calibration
+    [c] = apply_calibration([_c("kraken", est_slippage_bps=4.0)], _report("kraken", 6.0, 2))
+    assert c.est_slippage_bps == 4.0  # too few fills → priors stand (cold-start)
+
+
+def test_calibration_leaves_unknown_venue_untouched():
+    from router import apply_calibration
+    [c] = apply_calibration([_c("newvenue", est_slippage_bps=4.0)], _report("kraken", 6.0, 50))
+    assert c.est_slippage_bps == 4.0
+
+
+def test_calibration_does_not_mutate_inputs():
+    from router import apply_calibration
+    orig = _c("kraken", est_slippage_bps=4.0)
+    apply_calibration([orig], _report("kraken", 6.0, 50))
+    assert orig.est_slippage_bps == 4.0
+
+
+def test_calibration_can_flip_the_recommendation():
+    # Two near-identical venues; calibration penalizes the otherwise-better one.
+    good = _c("a", est_slippage_bps=4.0)
+    other = _c("b", est_slippage_bps=5.0)
+    base = rank_routes([good, other])
+    assert base.recommended_route == "a"
+    # 'a' actually fills 10 bps worse than modeled → 'b' should win.
+    report = _report("a", 10.0, 50)
+    cal = rank_routes([good, other], route_quality=report)
+    assert cal.recommended_route == "b"
+
+
+def test_none_report_is_noop():
+    from router import apply_calibration
+    cands = [_c("a")]
+    assert apply_calibration(cands, None) is cands
