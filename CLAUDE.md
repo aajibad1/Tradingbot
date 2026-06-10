@@ -73,6 +73,7 @@ docs/CONNECTOR_ARCHITECTURE.md   Pluggable connector contract
 docs/STRATEGY_GUIDE.md           Strategies + net-edge math   docs/RISK_POLICY.md  Limits/kill switch/drawdown
 docs/EXCHANGE_FEES.md            Canonical per-venue taker fees   docs/TAX_COMPLIANCE.md  Wash-sale/FIFO/HIFO
 docs/MULTI_TENANCY.md  Tenant namespacing   docs/TRADING_ASSUMPTIONS.md  Promotion gates   docs/SLOS.md  SLO targets
+docs/RUNBOOKS.md       Repo-grounded ops runbooks (expands docs/11): incident triage, kill-switch, deploy/rollback, outages
 ```
 Two doc layers: the **blueprint** set (01–12) is the forward-looking handoff;
 the **reference** docs carry canonical detail (fees, risk limits, tax, SLOs) that
