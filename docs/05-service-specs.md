@@ -171,7 +171,8 @@ trading wedge under slightly different names. Status: ✅ built · 🟡 partial/
 | onramp-orchestrator | `services/onramp-orchestrator` | 🟡 **SANDBOX only** (fiat→stable; `funding.*` events) |
 | offramp-orchestrator | `services/offramp-orchestrator` | 🟡 **SANDBOX only** (stable→fiat; `payout.*` events) |
 | settlement-status | `services/settlement-status` | ✅ read model — projects funding+payout → normalized settlement |
-| partner-auth / api-metering / tenant-billing / partner-webhook | — | ❌ not started |
+| partner-webhook | `services/webhook-service` | ✅ HMAC-signed delivery of funding/payout events; rotate-secret + replay |
+| partner-auth / api-metering / tenant-billing | — | ❌ not started |
 
 The on/off-ramp orchestrators are the doc-sanctioned sandbox-first build (docs/06
 sandbox tier): each exercises the full platform contract end to end —

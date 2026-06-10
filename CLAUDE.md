@@ -24,6 +24,7 @@ services/
   onramp-orchestrator/     Fiat→stablecoin on-ramp (sandbox simulator) → funding-events
   offramp-orchestrator/    Stablecoin→fiat payout (sandbox simulator) → payout-events
   settlement-status/       Read model: projects funding+payout events → normalized settlement
+  webhook-service/         HMAC-signed partner webhook delivery (funding/payout); rotate + replay
   # Control plane — multi-tenant SaaS (Cloud SQL Postgres)
   core-api/                Identity/tenant/RBAC, onboarding state machine, Stripe billing→entitlements,
                            live-enable gate (perm×plan×onboarding×funding), audit, funding, dashboard,
@@ -103,6 +104,7 @@ PYTHONPATH=.:services/opportunity-ranker   python3 -m pytest services/opportunit
 PYTHONPATH=.:services/onramp-orchestrator  python3 -m pytest services/onramp-orchestrator/tests/ -v
 PYTHONPATH=.:services/offramp-orchestrator python3 -m pytest services/offramp-orchestrator/tests/ -v
 PYTHONPATH=.:services/settlement-status    python3 -m pytest services/settlement-status/tests/ -v
+PYTHONPATH=.:services/webhook-service      python3 -m pytest services/webhook-service/tests/ -v
 
 # All services in one run (note PYTHONPATH order)
 PYTHONPATH=.:services/risk-engine:services/paper-trader:services/market-data:services/funding-rate-service \

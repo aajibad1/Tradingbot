@@ -41,6 +41,9 @@ SUBSCRIPTIONS: dict[str, str] = {
     # API plane (sandbox): settlement-status projects funding + payout lifecycles.
     "funding-events-settlement": "funding-events",
     "payout-events-settlement": "payout-events",
+    # API plane (sandbox): webhook-service fans funding + payout events to partners.
+    "funding-events-webhook": "funding-events",
+    "payout-events-webhook": "payout-events",
 }
 
 
