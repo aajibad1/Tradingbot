@@ -34,5 +34,12 @@ Defines the operational procedures needed to run the platform in production and 
 4. controlled production
 5. scaled onboarding
 
+## Implemented
+Concrete, repo-grounded runbooks (every command/endpoint is real) live in
+**`docs/RUNBOOKS.md`**: incident triage, kill-switch reset, deploy/rollback, provider/
+venue outage, webhook backlog, failed settlement, degraded AI/agent, credential
+rotation, billing/metering outage, plus the go-live checklist with the gated-items
+guardrail.
+
 ## Expansion task
 Claude should convert this into detailed runbooks, checklists, ownership tables, and cutover steps.
