@@ -165,9 +165,18 @@ trading wedge under slightly different names. Status: ✅ built · 🟡 partial/
 | web-frontend | `apps/frontend` (Next.js) | ✅ |
 | developer-portal / admin-console / public-api-gateway | — (`services/dashboard-api` is a partial ops API) | ❌ / 🟡 |
 
-### API plane (gated on wedge + licensing — see docs/REGULATORY_BRIEF.md)
-partner-auth · api-metering · tenant-billing · onramp-orchestrator · offramp-orchestrator ·
-settlement-status · partner-webhook — **all ❌ not started (by design).**
+### API plane (live rails gated on licensing — see docs/REGULATORY_BRIEF.md)
+| Blueprint | Repo | Status |
+|---|---|---|
+| onramp-orchestrator | `services/onramp-orchestrator` | 🟡 **SANDBOX only** (deterministic simulator; live rails gated) |
+| offramp-orchestrator / settlement-status / partner-auth / api-metering / tenant-billing / partner-webhook | — | ❌ not started |
+
+`onramp-orchestrator` is the doc-sanctioned sandbox-first build (docs/06 sandbox
+tier): it exercises the full platform contract end to end — `install_contract`
+(correlation + error model), Idempotency-Key on create, the `Status` taxonomy for
+the order lifecycle, and `funding.*` events via the canonical envelope. No real
+money moves; `sandbox_provider.assert_sandbox_only()` fails loud if pointed at a
+real provider before licensing clears.
 
 ### Agent services
 | Blueprint | Repo | Status |

@@ -55,6 +55,12 @@ class Topic(str, Enum):
     # notification-dispatcher consumes them to alert a human to settle — never
     # auto-executed (settlement is money-transmission/VASP-regulated).
     CORRIDOR_ALERTS = "arb-corridor-alerts"
+    # API-plane funding lifecycle (docs/06 on-ramp/off-ramp; docs/07 funding.*).
+    # Emitted wrapped in the canonical EventEnvelope (event_type funding.created /
+    # funding.processing / funding.completed / funding.failed). SANDBOX-only today:
+    # the live Africa rails are gated on money-transmission licensing
+    # (docs/REGULATORY_BRIEF.md) — see services/onramp-orchestrator.
+    FUNDING_EVENTS = "funding-events"
 
 
 class EventPublisher:
