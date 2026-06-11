@@ -95,6 +95,9 @@ def get_exchange_credentials(exchange: str, tenant_id: str = DEFAULT_TENANT) -> 
     if ex in {"coinbase", "kraken"}:
         try:
             creds["password"] = get_secret(exchange_secret_id(exchange, "password", tenant_id), required=True)  # type: ignore[assignment]
-        except RuntimeError:
+        except Exception:  # noqa: BLE001
+            # Passphrase is OPTIONAL. A missing secret raises RuntimeError locally but
+            # google.api_core PermissionDenied/NotFound in cloud — catch both so the
+            # collector isn't crashed by an absent optional credential.
             logger.info("no passphrase secret for %s/%s — proceeding without", tenant_id, ex)
     return creds
