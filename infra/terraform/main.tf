@@ -131,6 +131,16 @@ locals {
       publish_topics = ["arb-market-data", "arb-audit-log"]
       subscribe_subs = []
       cpu_idle       = false # WebSocket connections require always-allocated CPU
+      # LIVE READ-ONLY data: which venues/symbols the CCXT collectors stream. Public
+      # WS feeds (no trading). Without this, market-data runs zero collectors. Start
+      # conservative (spot BTC/ETH on two venues); expand to perp/funding once proven.
+      env = {
+        MARKET_DATA_CONFIG = jsonencode({
+          kraken      = { spot = ["BTC/USD", "ETH/USD"] }
+          coinbase    = { spot = ["BTC/USD", "ETH/USD"] }
+          hyperliquid = { perp = ["BTC/USDC:USDC", "ETH/USDC:USDC"] }
+        })
+      }
     }
     "funding-rate-service" = {
       secrets        = ["COINGLASS_API_KEY", "ARBITRAGE_SCANNER_KEY"]
