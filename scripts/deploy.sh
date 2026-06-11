@@ -112,7 +112,9 @@ else
     dockerfile="$REPO_ROOT/services/$svc/Dockerfile"
     [[ -f "$dockerfile" ]] || die "no Dockerfile for service '$svc' ($dockerfile)"
     echo "  → $svc"
-    docker build -q \
+    # MUST target linux/amd64 — Cloud Run rejects arm64 (e.g. images built on an
+    # Apple Silicon Mac). --platform forces a single-arch amd64 image.
+    docker build -q --platform linux/amd64 \
       -f "$dockerfile" \
       -t "${REGISTRY}/${svc}:${TAG}" \
       -t "${REGISTRY}/${svc}:latest" \

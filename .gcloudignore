@@ -1,0 +1,10 @@
+.git/
+.terraform/
+**/__pycache__/
+**/.pytest_cache/
+node_modules/
+apps/frontend/node_modules/
+apps/frontend/.next/
+*.pdf
+docs/generated-image.png
+*.rdb
