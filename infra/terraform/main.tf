@@ -241,7 +241,11 @@ locals {
     # Public (frontend + Stripe/Clerk webhooks); auth is per-request (Clerk JWT
     # / webhook signatures), not Cloud Run IAM.
     "core-api" = {
-      secrets             = ["STRIPE_WEBHOOK_SECRET", "CLERK_WEBHOOK_SECRET"]
+      # STRIPE/CLERK webhook secrets are unmounted for the paper deploy — they live
+      # in the shared agenuit project with no value yet, and core-api reads them via
+      # os.environ.get() (the Stripe/Clerk webhook endpoints return 503 "not
+      # configured" until set). Re-add here once real secret versions exist.
+      secrets             = []
       publish_topics      = []
       subscribe_subs      = []
       cpu_idle            = true
