@@ -94,8 +94,12 @@ class BaseCollector:
         while not self._stopping.is_set():
             try:
                 self._client = await self._build_client()
+                # CCXT Pro requires the market map before watch_ticker/orderbook —
+                # without this, every watch fails with "<exchange> markets not loaded".
+                await self._client.load_markets()
                 backoff = _RECONNECT_INITIAL_S  # reset on successful (re)connect
-                logger.info("%s connected, watching %s", self.config.exchange, self.config.symbols)
+                logger.info("%s connected (%d markets), watching %s",
+                            self.config.exchange, len(self._client.markets or {}), self.config.symbols)
                 await self._watch_loop()
             except asyncio.CancelledError:
                 raise
