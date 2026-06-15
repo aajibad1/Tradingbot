@@ -65,6 +65,14 @@ locals {
       time_partitioning = "decided_at"
       clustering        = ["strategy", "approved"]
     }
+    # High-volume live market-data ticks (trade-ledger forward-collects when
+    # ENABLE_TICK_COLLECTION=true). 90-day expiry via the arb_market_data dataset.
+    ticks = {
+      dataset           = "arb_market_data"
+      schema_file       = "${path.module}/schemas/ticks.json"
+      time_partitioning = "observed_at"
+      clustering        = ["exchange", "symbol"]
+    }
   }
 }
 

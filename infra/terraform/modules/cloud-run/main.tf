@@ -181,8 +181,17 @@ resource "google_project_iam_member" "bigquery_dataviewer" {
 }
 
 resource "google_project_iam_member" "bigquery_jobuser" {
-  count   = var.bigquery_reader ? 1 : 0
+  count   = var.bigquery_reader || var.bigquery_writer ? 1 : 0
   project = var.project_id
   role    = "roles/bigquery.jobUser"
+  member  = "serviceAccount:${google_service_account.svc.email}"
+}
+
+# trade-ledger is the sole BigQuery WRITER — needs dataEditor to insert rows
+# (incl. streaming inserts to arb_market_data.ticks). jobUser granted above.
+resource "google_project_iam_member" "bigquery_dataeditor" {
+  count   = var.bigquery_writer ? 1 : 0
+  project = var.project_id
+  role    = "roles/bigquery.dataEditor"
   member  = "serviceAccount:${google_service_account.svc.email}"
 }
