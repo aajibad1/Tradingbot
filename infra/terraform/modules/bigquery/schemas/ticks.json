@@ -1,0 +1,13 @@
+[
+  {"name": "exchange", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "symbol", "type": "STRING", "mode": "REQUIRED", "description": "canonical, e.g. BTC/USD or BTC/USD:PERP"},
+  {"name": "asset", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "bid", "type": "NUMERIC", "mode": "REQUIRED"},
+  {"name": "ask", "type": "NUMERIC", "mode": "REQUIRED"},
+  {"name": "bid_size", "type": "NUMERIC", "mode": "NULLABLE"},
+  {"name": "ask_size", "type": "NUMERIC", "mode": "NULLABLE"},
+  {"name": "last", "type": "NUMERIC", "mode": "NULLABLE"},
+  {"name": "instrument_type", "type": "STRING", "mode": "NULLABLE", "description": "spot | perp"},
+  {"name": "observed_at", "type": "TIMESTAMP", "mode": "REQUIRED"},
+  {"name": "ingested_at", "type": "TIMESTAMP", "mode": "NULLABLE"}
+]

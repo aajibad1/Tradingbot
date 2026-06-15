@@ -134,11 +134,13 @@ locals {
       # LIVE READ-ONLY data: which venues/symbols the CCXT collectors stream. Public
       # WS feeds (no trading). Without this, market-data runs zero collectors. Start
       # conservative (spot BTC/ETH on two venues); expand to perp/funding once proven.
+      # LIVE READ-ONLY data: kraken streams on public feeds (works with the
+      # arb-kraken-* secrets). coinbase needs REAL API keys (its CCXT client
+      # authenticates on connect) — add them to arb-coinbase-* then add coinbase
+      # here. hyperliquid omitted pending a CCXT perp market-load fix.
       env = {
         MARKET_DATA_CONFIG = jsonencode({
-          kraken      = { spot = ["BTC/USD", "ETH/USD"] }
-          coinbase    = { spot = ["BTC/USD", "ETH/USD"] }
-          hyperliquid = { perp = ["BTC/USDC:USDC", "ETH/USDC:USDC"] }
+          kraken = { spot = ["BTC/USD", "ETH/USD"] }
         })
       }
     }
@@ -185,6 +187,8 @@ locals {
         "arb-market-data-ledger",
       ]
       cpu_idle = true
+      # Sole BigQuery writer — needs dataEditor (incl. streaming inserts to ticks).
+      bigquery_writer = true
       # Opt-in tick persistence for cross-exchange backtesting (downsampled + batched).
       env = { ENABLE_TICK_COLLECTION = "true" }
     }
@@ -497,6 +501,7 @@ module "cloud_run" {
   secrets             = each.value.secrets
   allow_public_invoke = lookup(each.value, "allow_public_invoke", false)
   bigquery_reader     = lookup(each.value, "bigquery_reader", false)
+  bigquery_writer     = lookup(each.value, "bigquery_writer", false)
   # Public services accept internet ingress; everything else is internal-only
   # (Cloud Scheduler / Pub/Sub / VPC still reach it). Defence-in-depth beyond IAM.
   ingress = lookup(each.value, "allow_public_invoke", false) ? "INGRESS_TRAFFIC_ALL" : "INGRESS_TRAFFIC_INTERNAL_ONLY"

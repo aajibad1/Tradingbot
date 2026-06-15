@@ -102,6 +102,16 @@ variable "bigquery_reader" {
   default     = false
 }
 
+variable "bigquery_writer" {
+  description = <<-EOD
+    Grant the service's runtime SA ``roles/bigquery.dataEditor`` +
+    ``roles/bigquery.jobUser`` so it can INSERT rows (incl. streaming inserts).
+    Only trade-ledger (the sole BigQuery writer) needs this.
+  EOD
+  type        = bool
+  default     = false
+}
+
 variable "ingress" {
   description = <<-EOD
     Cloud Run ingress. Defaults to INTERNAL_ONLY so the service is not reachable
