@@ -39,12 +39,24 @@ def _abstain_skeptic(claim, context, proposer) -> Position:
 
 def _agents(n_skeptics: int):
     """Resolve debate agents. With ANTHROPIC_API_KEY a real Claude-backed panel
-    plugs in here; without it we fail soft to abstaining agents (verdict
-    'uncertain'), so the deterministic path is never blocked."""
+    (proposer + diverse skeptics) plugs in here; without it we fail soft to
+    abstaining agents (verdict 'uncertain'), so the deterministic path is never
+    blocked. DEBATE_MODEL overrides the default Claude model."""
+    abstainers = (_abstain_proposer, [_abstain_skeptic for _ in range(n_skeptics)])
     if not os.environ.get("ANTHROPIC_API_KEY"):
-        return _abstain_proposer, [_abstain_skeptic for _ in range(n_skeptics)]
-    # TODO: wire Claude personas (proposer + diverse skeptics) + Perplexity evidence.
-    return _abstain_proposer, [_abstain_skeptic for _ in range(n_skeptics)]
+        return abstainers
+    # Imported lazily so the service (and tests) stay importable without the SDK.
+    # If the SDK is absent or the client can't be built, degrade to abstaining
+    # agents rather than crashing the endpoint — same fail-soft contract as the
+    # no-key path (the deterministic risk-engine is never blocked on this).
+    try:
+        from claude_agents import AnthropicLLMClient, DEFAULT_MODEL, build_claude_agents
+
+        client = AnthropicLLMClient(model=os.environ.get("DEBATE_MODEL", DEFAULT_MODEL))
+        return build_claude_agents(n_skeptics, client=client)
+    except Exception:  # noqa: BLE001 — degrade, don't crash; ImportError, bad config, etc.
+        logger.exception("Claude debate panel unavailable; falling back to abstention")
+        return abstainers
 
 
 class DebateIn(BaseModel):

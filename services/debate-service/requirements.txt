@@ -1,3 +1,6 @@
 fastapi==0.115.5
 uvicorn[standard]==0.32.1
 pydantic==2.10.3
+# Optional at import time (loaded lazily in claude_agents.py), but required for
+# the live Claude-backed debate panel when ANTHROPIC_API_KEY is set.
+anthropic==0.112.0
