@@ -45,6 +45,15 @@ services/
   agent-registry/          Agents + immutable prompt/model versions; activation gated on passing eval (docs/10)
   agent-evals/             Eval harness (accuracy/hallucination/latency) + promotion verdicts (docs/10)
   connector-runtime/       Shared-core: registry of pluggable venues + health read model (docs/03; no creds/IO)
+  # Intelligence / signal plane — hybrid deterministic+advisory layer (ADVISORY; never gates a trade)
+  movement-feature-builder/ Market window → movement features (deterministic)
+  signal-engine/           Deterministic movement-signal detection over features
+  regime-classifier/       Deterministic market-regime labels (trend/chop/vol)
+  venue-anomaly-detector/  Flag degraded venue feeds (advisory health signal)
+  route-optimizer/         Advisory route ranking; never executes
+  corridor-intelligence-service/ Perplexity-backed Africa corridor intelligence
+  debate-service/          Multi-agent adversarial verification (Claude panel, key-gated, fail-soft)
+  signal-replay-service/   Label + score signals vs realized outcomes (learning layer)
 apps/
   frontend/                Next.js (App Router): onboarding stepper + dashboard → core-api
 shared/
@@ -53,6 +62,8 @@ shared/
   pubsub/publisher.py      Topic enum + EventPublisher/NullPublisher factory; publish_event() wraps in envelope
   http/                    API contract (docs/06): install_contract(app) = correlation (x-request-id/
                            x-correlation-id) + standard error model (APIError) + idempotency store
+  a2a/                     Agent↔agent contract (docs/10): AgentCard + JSON-RPC (message/send,
+                           tasks/get, tasks/cancel); install_a2a(app, card, handler) + A2AClient/registry
   tenant.py                Tenant namespacing: risk_key, exchange_secret_id, eligibility_key
   utils/                   fee_calculator, exchange_normalizer, slippage_model
 # Blueprint layer — numbered handoff (01–12); each ends with an "Expansion task"
@@ -138,6 +149,16 @@ PYTHONPATH=.:services/agent-registry       python3 -m pytest services/agent-regi
 PYTHONPATH=.:services/agent-evals          python3 -m pytest services/agent-evals/tests/ -v
 PYTHONPATH=.:services/connector-runtime    python3 -m pytest services/connector-runtime/tests/ -v
 
+# Intelligence / signal plane (deterministic + advisory; SQLite/no cloud deps)
+PYTHONPATH=.:services/movement-feature-builder    python3 -m pytest services/movement-feature-builder/tests/ -v
+PYTHONPATH=.:services/signal-engine               python3 -m pytest services/signal-engine/tests/ -v
+PYTHONPATH=.:services/regime-classifier           python3 -m pytest services/regime-classifier/tests/ -v
+PYTHONPATH=.:services/venue-anomaly-detector      python3 -m pytest services/venue-anomaly-detector/tests/ -v
+PYTHONPATH=.:services/route-optimizer             python3 -m pytest services/route-optimizer/tests/ -v
+PYTHONPATH=.:services/corridor-intelligence-service python3 -m pytest services/corridor-intelligence-service/tests/ -v
+PYTHONPATH=.:services/debate-service              python3 -m pytest services/debate-service/tests/ -v
+PYTHONPATH=.:services/signal-replay-service       python3 -m pytest services/signal-replay-service/tests/ -v
+
 # All services in one run (note PYTHONPATH order)
 PYTHONPATH=.:services/risk-engine:services/paper-trader:services/market-data:services/funding-rate-service \
   python3 -m pytest services/ -q
@@ -200,8 +221,43 @@ The `risk:*` keys in Redis are documented at the top of `services/risk-engine/st
 
 `services/opportunity-engine/main.py` uses an in-memory `MarketSnapshot` updated by Pub/Sub callbacks. Strategies are throttled to one evaluation per `EVAL_INTERVAL_S` (default 1.0s) — do not call strategies on every tick, you'll get thousands of evals/sec. Above-threshold opportunities are published freely; `risk-engine` is the filter.
 
+### Agents talk over A2A, not bespoke HTTP
+
+Agent↔agent communication uses the **A2A (Agent2Agent) contract** in `shared/a2a/` (docs/10) — the complement to MCP's agent↔tool contract. A service becomes an agent with one call:
+
+```python
+from shared.a2a import install_a2a, AgentCard, AgentSkill, text_part, data_part
+install_a2a(app, card=AgentCard(...), handler=lambda m: [text_part(summary), data_part(result)])
+```
+
+That serves `GET /.well-known/agent-card.json` (discovery) + `POST /a2a` (JSON-RPC 2.0: `message/send`, `tasks/get`, `tasks/cancel`). The five governance/intelligence agents are wired: **debate-service** (verify-claim), **approval-gate-service** (evaluate-action), **agent-registry** (resolve-active-version), **agent-evals** (eval-verdict), **ai-ops-agent** (invoke an advertised ops tool). Resolve a peer with `client_for(name)` / `base_url(name)` (env override `A2A_<NAME>_URL`). Handlers are **fail-soft** — any error becomes a JSON-RPC error, never a 500 — and invariants hold across A2A exactly as over HTTP (ai-ops-agent's NEVER-tier tools stay non-discoverable and non-invocable; approval-gate's withdrawals stay hardcoded-blocked).
+
 ## Conventions worth knowing
 
 - **Symbol normalization**: cross-venue comparisons use the canonical form from `shared/utils/exchange_normalizer.py` (`BTC/USD` or `BTC/USD:PERP`). `USDT`/`USDC`/`ZUSD` all collapse to `USD`. Kraken's `XBT` → `BTC`.
 - **Funding period**: Hyperliquid funds hourly (1.0h); other CEX perps fund every 8h. The split lives in `services/funding-rate-service/normalizer.py#from_ccxt` and `services/paper-trader/simulator/funding_simulator.py#funding_period_hours`.
 - **AI permission model** (see `docs/10-agent-governance.md`): read-only ops are autonomous; risk-limit or trade-size changes are propose-only and require Slack approval; withdrawals / leverage increases are hardcoded blocked.
+
+<!-- claude-loop-toolkit -->
+# Loop discipline (ALWAYS — for every coding task, no command needed)
+
+Run the build-test-fix loop on EVERY non-trivial coding task automatically.
+Do not declare a task done until you have run this repo's verify command
+(`.claude/verify`) and seen it pass. A global Stop hook also enforces this and
+will send you back if checks fail.
+
+Cycle: **orient -> smallest change -> verify -> read the real output -> decide -> repeat.**
+1. Orient before editing — read the files and tests you're about to touch.
+2. Smallest change that could work — one hypothesis per iteration.
+3. Verify by RUNNING the check, not by reading. Read its output before claiming success.
+4. Feed failures back in — the error output is the next prompt.
+5. Stop when green, or after ~8 tries; then report what you tried and the root-cause guess.
+
+Hard guardrails:
+- Never weaken, skip, or delete a test to make the suite pass.
+- Never revert previously-correct work to escape an error.
+- If the same fix fails twice, your assumption is wrong — re-investigate.
+
+Loops: `/plan <task>`, `/loop <goal> | <verify-cmd>`, `/review-loop`, and
+`~/.claude/autodev.sh "<goal>" "$(cat .claude/verify)"` for headless runs.
+<!-- /claude-loop-toolkit -->
