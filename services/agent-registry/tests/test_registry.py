@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
+from shared.a2a import Message, Task, TaskStatus, data_part
 
 import main
 
@@ -12,8 +12,25 @@ import main
 @pytest.fixture()
 def client(monkeypatch):
     monkeypatch.delenv("AGENT_EVALS_URL", raising=False)
+    monkeypatch.delenv("A2A_AGENT_EVALS_URL", raising=False)
     main._agents.clear()
     return TestClient(main.app)
+
+
+def _stub_evals(monkeypatch, verdict: dict):
+    """Stand in for the agent-evals A2A peer: _eval_passed calls
+    A2AClient(base).send_data(...) → a completed Task carrying the verdict.
+    `verdict` is read at call time, so mutating it flips the answer mid-test."""
+    class _Stub:
+        def __init__(self, base, timeout=None):
+            pass
+
+        def send_data(self, data):
+            reply = Message(role="agent", parts=[data_part(verdict)], message_id="r")
+            return Task(id="t", context_id="c",
+                        status=TaskStatus(state="completed", message=reply))
+
+    monkeypatch.setattr(main, "A2AClient", _Stub)
 
 
 def _agent(client, name="ranker"):
@@ -52,21 +69,14 @@ def test_activate_unknown_version_404(client):
     assert r.status_code == 404 and r.json()["error"]["code"] == "version_not_found"
 
 
-def test_activation_gated_on_eval_verdict(client, monkeypatch):
-    monkeypatch.setenv("AGENT_EVALS_URL", "http://agent-evals")
+def test_activation_gated_on_eval_verdict_over_a2a(client, monkeypatch):
+    monkeypatch.setenv("AGENT_EVALS_URL", "http://agent-evals")  # any base → evals wired
     _agent(client)
     client.post("/v1/agents/ranker/prompts", json={"version": "v1", "content": "x"})
 
     verdict = {"passed": False, "failures": ["accuracy 0.5 < 0.8"]}
+    _stub_evals(monkeypatch, verdict)
 
-    def fake_get(url, params=None, timeout=None):
-        class _R:
-            status_code = 200
-            def json(self_):  # noqa: N805
-                return verdict
-        return _R()
-
-    monkeypatch.setattr(httpx, "get", fake_get)
     # failing eval → activation blocked
     r = client.post("/v1/agents/ranker/activate", json={"version": "v1"})
     assert r.status_code == 409 and r.json()["error"]["code"] == "eval_not_passed"
@@ -77,18 +87,27 @@ def test_activation_gated_on_eval_verdict(client, monkeypatch):
     assert r2.status_code == 200 and r2.json()["active"] == "v1"
 
 
-def test_activation_blocked_when_not_evaluated(client, monkeypatch):
+def test_activation_blocked_when_not_evaluated_over_a2a(client, monkeypatch):
+    monkeypatch.setenv("A2A_AGENT_EVALS_URL", "http://agent-evals/a2a")
+    _agent(client)
+    client.post("/v1/agents/ranker/prompts", json={"version": "v1", "content": "x"})
+    _stub_evals(monkeypatch, {"passed": False, "failures": ["not evaluated"]})
+    r = client.post("/v1/agents/ranker/activate", json={"version": "v1"})
+    assert r.status_code == 409 and "not evaluated" in r.json()["error"]["message"]
+
+
+def test_activation_fail_closed_when_evals_unreachable(client, monkeypatch):
     monkeypatch.setenv("AGENT_EVALS_URL", "http://agent-evals")
     _agent(client)
     client.post("/v1/agents/ranker/prompts", json={"version": "v1", "content": "x"})
 
-    def fake_get(url, params=None, timeout=None):
-        class _R:
-            status_code = 404
-            def json(self_):  # noqa: N805
-                return {}
-        return _R()
+    class _Down:
+        def __init__(self, base, timeout=None):
+            pass
 
-    monkeypatch.setattr(httpx, "get", fake_get)
+        def send_data(self, data):
+            raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(main, "A2AClient", _Down)
     r = client.post("/v1/agents/ranker/activate", json={"version": "v1"})
-    assert r.status_code == 409 and "not evaluated" in r.json()["error"]["message"]
+    assert r.status_code == 409 and "unreachable" in r.json()["error"]["message"]

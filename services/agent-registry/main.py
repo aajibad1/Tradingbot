@@ -29,11 +29,11 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-import httpx
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 from shared.a2a import (
+    A2AClient,
     A2AError,
     AgentCard,
     AgentProvider,
@@ -138,24 +138,25 @@ def list_prompts(name: str) -> dict[str, Any]:
 
 
 def _eval_passed(agent: str, version: str) -> tuple[bool, str]:
-    """Consult agent-evals for a passing verdict. When AGENT_EVALS_URL is unset we
-    allow activation (sandbox/bootstrap). Fail-CLOSED on a reachable-but-not-passing
-    or un-evaluated version."""
-    url = os.environ.get("AGENT_EVALS_URL")
-    if not url:
+    """Consult agent-evals for a passing verdict over A2A (the agent↔agent
+    contract). When evals isn't wired (no A2A_AGENT_EVALS_URL / AGENT_EVALS_URL)
+    we allow activation (sandbox/bootstrap). Fail-CLOSED on a reachable-but-not-
+    passing or un-evaluated version. The legacy AGENT_EVALS_URL still works: A2A's
+    endpoint lives at {base}/a2a on the same agent-evals service."""
+    base = os.environ.get("A2A_AGENT_EVALS_URL") or os.environ.get("AGENT_EVALS_URL")
+    if not base:
         return True, "evals not configured (sandbox)"
     try:
-        r = httpx.get(f"{url.rstrip('/')}/v1/evals/verdict",
-                      params={"agent": agent, "version": version}, timeout=5.0)
+        task = A2AClient(base, timeout=5.0).send_data({"agent": agent, "version": version})
     except Exception:
         return False, "eval service unreachable"
-    if r.status_code == 404:
+    reply = task.status.message
+    data = (reply.data() if reply is not None else None) or {}
+    if data.get("passed"):
+        return True, "eval passed"
+    if data.get("failures") == ["not evaluated"]:
         return False, "version not evaluated"
-    try:
-        body = r.json()
-    except Exception:
-        return False, "bad eval response"
-    return bool(body.get("passed")), ("eval passed" if body.get("passed") else f"eval failed: {body.get('failures')}")
+    return False, f"eval failed: {data.get('failures')}"
 
 
 @app.post("/v1/agents/{name}/activate")
