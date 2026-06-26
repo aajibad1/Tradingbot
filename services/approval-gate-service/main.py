@@ -29,6 +29,18 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 import policy
+from shared.a2a import (
+    A2AError,
+    AgentCard,
+    AgentProvider,
+    AgentSkill,
+    Message,
+    base_url,
+    data_part,
+    install_a2a,
+    text_part,
+)
+from shared.a2a import errors as a2a_errors
 from shared.http import APIError, install_contract
 from shared.pubsub.publisher import Topic, get_publisher
 
@@ -153,3 +165,46 @@ def decide(proposal_id: str, req: Decision) -> dict[str, Any]:
     _proposals[proposal_id] = p
     _emit("agent.proposal_decided", p)
     return p
+
+
+# --- A2A (Agent2Agent) surface ------------------------------------------------
+# The execution-guard / permission-model gate (docs/10) exposed over A2A: a peer
+# agent proposes an action (data part with ProposalCreate fields); we classify it
+# under the permission model and return the decision — auto_approved (read),
+# pending_approval (sensitive → human), or blocked (withdrawals/leverage). The
+# hardcoded-block invariant holds regardless of transport.
+_A2A_CARD = AgentCard(
+    name="approval-gate-service",
+    description=("AI permission-model gate: classify a proposed agent action as "
+                 "auto-approved (read-only), pending human approval (sensitive), or "
+                 "hardcoded-blocked (withdrawals/leverage). Returns the proposal record."),
+    url=f"{base_url('approval-gate-service')}/a2a",
+    version=app.version,
+    provider=AgentProvider(organization="traditbot"),
+    skills=[AgentSkill(
+        id="evaluate-action",
+        name="Evaluate a proposed action",
+        description=("Submit a proposed action under the permission model and receive "
+                     "its classification + decision. Withdrawals/leverage are never "
+                     "AI-executable."),
+        tags=["governance", "permissions", "approval", "safety"],
+        examples=['{"agent":"opportunity-ranker","action_type":"read","summary":"read funding rates"}'],
+    )],
+)
+
+
+def _a2a_handle(message: Message):
+    data = message.data()
+    if data is None:
+        raise A2AError(a2a_errors.INVALID_PARAMS,
+                       "data part with proposal fields (agent, action_type, summary) is required")
+    try:
+        req = ProposalCreate(**data)
+    except Exception as exc:  # noqa: BLE001 — bad proposal shape is invalid params
+        raise A2AError(a2a_errors.INVALID_PARAMS, f"invalid proposal: {exc}") from exc
+    proposal = submit(req)
+    summary = f"{proposal['classification']}: {req.action_type} proposed by {req.agent}"
+    return [text_part(summary), data_part(proposal)]
+
+
+install_a2a(app, card=_A2A_CARD, handler=_a2a_handle)

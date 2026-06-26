@@ -33,6 +33,18 @@ import httpx
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
+from shared.a2a import (
+    A2AError,
+    AgentCard,
+    AgentProvider,
+    AgentSkill,
+    Message,
+    base_url,
+    data_part,
+    install_a2a,
+    text_part,
+)
+from shared.a2a import errors as a2a_errors
 from shared.http import APIError, install_contract
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -165,3 +177,44 @@ def activate(name: str, body: dict[str, Any]) -> dict[str, Any]:
 def get_active(name: str) -> dict[str, Any]:
     agent = _get(name)
     return {"agent": name, "active": agent["active"]}
+
+
+# --- A2A (Agent2Agent) surface ------------------------------------------------
+# The registry of agents + immutable prompt/model versions (docs/10) exposed over
+# A2A: a peer asks which version of an agent is active (so it can pin the right,
+# eval-gated prompt/model). Read-only resolution — activation stays HTTP-gated.
+_A2A_CARD = AgentCard(
+    name="agent-registry",
+    description=("Registry of agents and their immutable prompt/model versions. "
+                 "Resolve the currently-active (eval-gated) version of any agent."),
+    url=f"{base_url('agent-registry')}/a2a",
+    version=app.version,
+    provider=AgentProvider(organization="traditbot"),
+    skills=[AgentSkill(
+        id="resolve-active-version",
+        name="Resolve active version",
+        description=("Given an agent name, return its active prompt version and the "
+                     "list of known versions."),
+        tags=["governance", "registry", "versioning", "discovery"],
+        examples=['{"agent":"opportunity-ranker"}', "opportunity-ranker"],
+    )],
+)
+
+
+def _a2a_handle(message: Message):
+    data = message.data() or {}
+    name = (data.get("agent") or message.text()).strip()
+    if not name:
+        raise A2AError(a2a_errors.INVALID_PARAMS,
+                       "agent name required (data {'agent': name} or text)")
+    try:
+        info = _public(_get(name))
+    except APIError as exc:
+        raise A2AError(a2a_errors.INVALID_PARAMS, f"{exc.code}: {exc.message}") from exc
+    result = {"agent": name, "active": info["active"],
+              "prompt_versions": info.get("prompt_versions", [])}
+    summary = f"{name} active={info['active'] or '(none)'}"
+    return [text_part(summary), data_part(result)]
+
+
+install_a2a(app, card=_A2A_CARD, handler=_a2a_handle)

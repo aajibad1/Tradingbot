@@ -30,6 +30,18 @@ from pydantic import BaseModel
 
 from mcp_server import _TOOL_IMPLS, call_tool, list_tools
 from permissions import ToolBlockedError
+from shared.a2a import (
+    A2AError,
+    AgentCard,
+    AgentProvider,
+    AgentSkill,
+    Message,
+    base_url,
+    data_part,
+    install_a2a,
+    text_part,
+)
+from shared.a2a import errors as a2a_errors
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("ai-ops-agent")
@@ -70,3 +82,48 @@ def invoke(tool_name: str, req: InvokeRequest) -> Any:
         return call_tool(tool_name, req.args)
     except ToolBlockedError as e:
         raise HTTPException(status_code=403, detail=str(e)) from e
+
+
+# --- A2A (Agent2Agent) surface ------------------------------------------------
+# The AI-ops agent (docs/10) exposed over A2A: each advertised MCP tool becomes
+# an A2A skill, and message/send invokes one through the SAME permission gate as
+# the HTTP/MCP paths. CRITICAL INVARIANT preserved: NEVER-tier tools are absent
+# from list_tools() (so they aren't advertised as skills) and absent from
+# _TOOL_IMPLS (so they can't be invoked) — A2A adds no new way to reach them.
+def _a2a_card() -> AgentCard:
+    skills = [
+        AgentSkill(id=t["name"], name=t["name"],
+                   description=t.get("description", ""), tags=["ops", "read", "advisory"])
+        for t in list_tools()
+    ]
+    return AgentCard(
+        name="ai-ops-agent",
+        description=("Read/propose-only AI ops agent. Invoke an advertised ops tool "
+                     "(balances, PnL, positions, exchange health, anomalies, reports). "
+                     "Withdrawal/leverage tools are never exposed or invocable."),
+        url=f"{base_url('ai-ops-agent')}/a2a",
+        version=app.version,
+        provider=AgentProvider(organization="traditbot"),
+        skills=skills,
+    )
+
+
+def _a2a_handle(message: Message):
+    data = message.data() or {}
+    tool = (data.get("tool") or message.text()).strip()
+    args = data.get("args") or {}
+    if not tool:
+        raise A2AError(a2a_errors.INVALID_PARAMS,
+                       "data part {'tool': name, 'args'?} (or text tool name) is required")
+    if tool not in _TOOL_IMPLS:
+        # Unknown OR NEVER-tier — refuse identically; never acknowledge NEVER tools.
+        raise A2AError(a2a_errors.INVALID_PARAMS, f"unknown tool {tool!r}")
+    try:
+        result = call_tool(tool, args)
+    except ToolBlockedError as exc:
+        raise A2AError(a2a_errors.UNSUPPORTED_OPERATION, str(exc)) from exc
+    payload = result if isinstance(result, dict) else {"result": result}
+    return [text_part(f"ai-ops:{tool} ok"), data_part(payload)]
+
+
+install_a2a(app, card=_a2a_card(), handler=_a2a_handle)

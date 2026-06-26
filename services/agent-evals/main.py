@@ -24,6 +24,18 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 import evals
+from shared.a2a import (
+    A2AError,
+    AgentCard,
+    AgentProvider,
+    AgentSkill,
+    Message,
+    base_url,
+    data_part,
+    install_a2a,
+    text_part,
+)
+from shared.a2a import errors as a2a_errors
 from shared.http import APIError, install_contract
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -98,3 +110,49 @@ def verdict(agent: str, version: str) -> dict[str, Any]:
 @app.get("/v1/evals/thresholds")
 def thresholds() -> dict[str, Any]:
     return {"thresholds": evals.DEFAULT_THRESHOLDS}
+
+
+# --- A2A (Agent2Agent) surface ------------------------------------------------
+# The eval harness (docs/10) exposed over A2A: a peer (e.g. an orchestrator
+# considering a promotion) asks whether an agent version passed its evals. A
+# never-evaluated version resolves to passed=false ('not promotable'), matching
+# how agent-registry fail-closes on activation.
+_A2A_CARD = AgentCard(
+    name="agent-evals",
+    description=("Eval harness for agent prompt/model versions (accuracy, "
+                 "hallucination, latency). Report the latest pass/fail verdict for a "
+                 "version; un-evaluated versions are reported as not-passing."),
+    url=f"{base_url('agent-evals')}/a2a",
+    version=app.version,
+    provider=AgentProvider(organization="traditbot"),
+    skills=[AgentSkill(
+        id="eval-verdict",
+        name="Get eval verdict",
+        description=("Given an agent and prompt version, return the latest pass/fail "
+                     "verdict and any failure reasons."),
+        tags=["governance", "evals", "promotion", "safety"],
+        examples=['{"agent":"opportunity-ranker","version":"v3"}'],
+    )],
+)
+
+
+def _a2a_handle(message: Message):
+    data = message.data() or {}
+    agent = (data.get("agent") or "").strip()
+    version = (data.get("version") or "").strip()
+    if not agent or not version:
+        raise A2AError(a2a_errors.INVALID_PARAMS,
+                       "data part with 'agent' and 'version' is required")
+    try:
+        result = verdict(agent, version)
+    except APIError as exc:
+        if exc.http_status == 404:  # never evaluated → not promotable (fail-closed)
+            result = {"agent": agent, "prompt_version": version, "passed": False,
+                      "failures": ["not evaluated"], "evaluated_at": None}
+        else:
+            raise A2AError(a2a_errors.INVALID_PARAMS, f"{exc.code}: {exc.message}") from exc
+    summary = f"{agent} {version}: {'PASS' if result['passed'] else 'FAIL'}"
+    return [text_part(summary), data_part(result)]
+
+
+install_a2a(app, card=_A2A_CARD, handler=_a2a_handle)
