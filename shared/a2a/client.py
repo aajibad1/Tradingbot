@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 
 from .errors import A2AError
-from .models import AgentCard, Message, Task, text_part
+from .models import AgentCard, Message, Task, data_part, text_part
 from .server import AGENT_CARD_PATH
 
 
@@ -46,6 +46,14 @@ class A2AClient:
     def send_text(self, text: str, *, context_id: str | None = None) -> Task:
         """Send a one-shot text message and return the resulting Task."""
         msg = Message(role="user", parts=[text_part(text)],
+                      message_id=uuid.uuid4().hex, context_id=context_id)
+        result = self._post("message/send", {"message": msg.wire()})
+        return Task.model_validate(result)
+
+    def send_data(self, data: dict, *, context_id: str | None = None) -> Task:
+        """Send a one-shot structured (data part) message — for agents that take
+        typed input rather than free text — and return the resulting Task."""
+        msg = Message(role="user", parts=[data_part(data)],
                       message_id=uuid.uuid4().hex, context_id=context_id)
         result = self._post("message/send", {"message": msg.wire()})
         return Task.model_validate(result)

@@ -82,6 +82,14 @@ def test_client_send_text_returns_task():
     assert task.artifacts[0].parts[1].data == {"len": 5}
 
 
+def test_client_send_data_returns_task():
+    # peer echoes len of the text; an empty data message has no text → len 0
+    task = _peer_client().send_data({"q": "lookup"})
+    assert task.status.state == "completed"
+    assert task.status.message.text() == "echo: "
+    assert task.artifacts[0].parts[1].data == {"len": 0}
+
+
 def test_client_raises_typed_error_from_peer():
     with pytest.raises(A2AError) as ei:
         _peer_client().send_text("boom")
