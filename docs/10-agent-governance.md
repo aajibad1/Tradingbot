@@ -46,6 +46,17 @@ Defines how the multi-agent system behaves safely in production.
   versions; a version cannot be activated until it has a passing eval verdict.
 - **Eval harness + promotion gate** — `services/agent-evals`: accuracy/hallucination/
   latency thresholds; the registry consults its verdict before activation.
+- **Agent↔agent interop (A2A)** — `shared/a2a`: the Agent2Agent contract (the
+  complement to MCP's agent↔tool contract). Each agent publishes an Agent Card at
+  `/.well-known/agent-card.json` advertising its skills, and exposes a JSON-RPC 2.0
+  endpoint (`message/send`, `tasks/get`, `tasks/cancel`) via `install_a2a(app, card,
+  handler)`. Wired on the critic/debate (`debate-service`), execution-guard
+  (`approval-gate-service`), registry, evals, and AI-ops (`ai-ops-agent`) agents.
+  Governance invariants are transport-independent: A2A is gated by the same
+  permission model — `ai-ops-agent`'s NEVER-tier tools are neither advertised as
+  skills nor invocable, and withdrawals/leverage stay hard-blocked. Handlers are
+  fail-soft (errors become JSON-RPC errors, never a crash). Peers resolve each
+  other via the registry (`client_for(name)`; `A2A_<NAME>_URL` override).
 
 Still to build (gated — only once the advisory loop is proven live): the autonomous
 agent orchestrator and scoped agent-memory.
