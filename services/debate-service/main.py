@@ -20,6 +20,16 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 from debate import Position, run_debate
+from shared.a2a import (
+    AgentCard,
+    AgentProvider,
+    AgentSkill,
+    Message,
+    base_url,
+    data_part,
+    install_a2a,
+    text_part,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("debate-service")
@@ -79,3 +89,44 @@ def debate(req: DebateIn) -> dict:
                 verdict.refuted_by, verdict.n_skeptics)
     out = asdict(verdict)
     return out
+
+
+# --- A2A (Agent2Agent) surface ------------------------------------------------
+# The critic/debate agent (docs/10) exposed over A2A: peers send a claim as a
+# text message; we return the calibrated verdict as a text summary + structured
+# data part. Advisory only — the verdict never gates a trade.
+_DEFAULT_N_SKEPTICS = 3
+
+_A2A_CARD = AgentCard(
+    name="debate-service",
+    description=("Adversarial verification of an advisory trading/market claim: a "
+                 "proposer argues for it, perspective-diverse skeptics try to refute "
+                 "it, and a deterministic judge returns a calibrated verdict. ADVISORY."),
+    url=f"{base_url('debate-service')}/a2a",
+    version=app.version,
+    provider=AgentProvider(organization="traditbot"),
+    skills=[AgentSkill(
+        id="verify-claim",
+        name="Verify a claim",
+        description=("Run a proposer/skeptic/judge debate over a claim and return a "
+                     "support|reject|uncertain verdict with confidence + transcript."),
+        tags=["verification", "advisory", "debate", "intelligence"],
+        examples=["funding carry on Hyperliquid is profitable right now",
+                  "the BTC/USD basis will hold through the next funding window"],
+    )],
+)
+
+
+def _a2a_handle(message: Message):
+    claim = message.text().strip()
+    if not claim:
+        from shared.a2a import A2AError, errors
+        raise A2AError(errors.INVALID_PARAMS, "A claim (text part) is required")
+    proposer, skeptics = _agents(_DEFAULT_N_SKEPTICS)
+    verdict = run_debate(claim, {}, proposer, skeptics)
+    summary = (f"{verdict.decision} (confidence {verdict.confidence:.2f}; "
+               f"refuted {verdict.refuted_by}/{verdict.n_skeptics})")
+    return [text_part(summary), data_part(asdict(verdict))]
+
+
+install_a2a(app, card=_A2A_CARD, handler=_a2a_handle)
