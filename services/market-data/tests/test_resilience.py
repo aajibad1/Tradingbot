@@ -14,6 +14,11 @@ class _PerSymbolMock:
     def __init__(self):
         self.calls: dict[str, int] = {}
         self.closed = False
+        self.markets: dict = {}
+
+    async def load_markets(self):
+        self.markets = {"BTC/USD": {}, "BAD/USD": {}}
+        return self.markets
 
     async def watch_ticker(self, symbol: str):
         self.calls[symbol] = self.calls.get(symbol, 0) + 1

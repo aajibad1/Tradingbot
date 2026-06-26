@@ -65,6 +65,13 @@ ok "Redis reachable at $REDIS_URL"
 redis-cli -u "$REDIS_URL" set risk:capital_usd "$CAPITAL_USD" >/dev/null
 ok "Seeded risk:capital_usd"
 
+# Start from a deterministic "ok" state: a prior run (or the paper-trade smoke)
+# may have left the kill switch tripped, which makes risk-engine /healthz return
+# 503 forever. This smoke drives ok→degraded→down, so it MUST begin un-tripped.
+redis-cli -u "$REDIS_URL" del risk:kill_switch:active risk:kill_switch:metadata >/dev/null
+redis-cli -u "$REDIS_URL" set risk:daily_pnl_usd 0 >/dev/null
+ok "Cleared stale kill-switch state"
+
 # ── boot services (local mode: GCP_PROJECT_ID unset → NullPublisher) ─────────
 start_service() {  # name port [env...]  → sets LAST_PID
   local name="$1" port="$2"; shift 2

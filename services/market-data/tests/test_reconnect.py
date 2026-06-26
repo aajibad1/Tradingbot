@@ -14,6 +14,11 @@ class _MockExchange:
         self.fail_count = fail_count
         self.call_count = 0
         self.closed = False
+        self.markets: dict = {}
+
+    async def load_markets(self):
+        self.markets = {"BTC/USD": {}}
+        return self.markets
 
     async def watch_ticker(self, symbol: str):
         self.call_count += 1
