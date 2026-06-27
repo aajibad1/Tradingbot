@@ -112,7 +112,10 @@ killed dependencies — reliability #1), and
 `./scripts/api_plane_smoke.sh` (sandbox API plane: partner-auth→gateway→{routing,
 onramp,wallet}; auth→scope→meter→proxy), and
 `./scripts/governance_smoke.sh` (agent governance: permission model + eval-gated
-promotion across approval-gate/agent-registry/agent-evals). All use only indexed bash arrays (macOS bash 3.2).
+promotion across approval-gate/agent-registry/agent-evals), and
+`./scripts/a2a_smoke.sh` (Agent2Agent contract: boots all 5 A2A agents — card
+discovery + message/send; ai-ops NEVER-tier stays hidden/refused; registry
+consults agent-evals over A2A). All use only indexed bash arrays (macOS bash 3.2).
 Frontend: `cd apps/frontend && npm install && npm run dev` (needs core-api on :8080).
 
 ## Running tests
