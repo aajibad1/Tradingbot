@@ -22,7 +22,6 @@ from __future__ import annotations
 from datetime import datetime
 
 import httpx
-import pytest
 
 from shared.models.opportunity import Opportunity, StrategyType
 from shared.pubsub.publisher import Topic

@@ -56,7 +56,6 @@ def test_start_subscribers_uses_emulator_project(monkeypatch):
     import types
 
     fake_pubsub = types.SimpleNamespace(SubscriberClient=lambda: _FakeSub())
-    fake_mod = types.ModuleType("google.cloud.pubsub_v1")
     monkeypatch.setitem(sys.modules, "google.cloud.pubsub_v1", fake_pubsub)
 
     main._subscriber_client = None
