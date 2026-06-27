@@ -111,6 +111,25 @@ jobs:
           - route-optimizer
           - signal-replay-service
           - account-link-service
+          # API plane (docs 05–06) — sandbox partner orchestration
+          - public-api-gateway
+          - developer-portal
+          - admin-console
+          - routing-service
+          - wallet-service
+          - onramp-orchestrator
+          - offramp-orchestrator
+          - settlement-status
+          - webhook-service
+          - partner-auth
+          - api-metering
+          - tenant-billing
+          # Agent governance (docs 10) + connector runtime (docs 03)
+          - approval-gate-service
+          - agent-registry
+          - agent-evals
+          - connector-runtime
+          - dashboard-api
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -162,6 +181,25 @@ jobs:
           - route-optimizer
           - signal-replay-service
           - account-link-service
+          # API plane (docs 05–06) — sandbox partner orchestration
+          - public-api-gateway
+          - developer-portal
+          - admin-console
+          - routing-service
+          - wallet-service
+          - onramp-orchestrator
+          - offramp-orchestrator
+          - settlement-status
+          - webhook-service
+          - partner-auth
+          - api-metering
+          - tenant-billing
+          # Agent governance (docs 10) + connector runtime (docs 03)
+          - approval-gate-service
+          - agent-registry
+          - agent-evals
+          - connector-runtime
+          - dashboard-api
     services:
       redis:
         image: redis:7
@@ -208,7 +246,9 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - run: pip install pydantic==2.9.2 pytest pytest-cov
+        # fastapi+httpx: shared/tests exercises the http-contract and a2a layers
+        # via FastAPI TestClient (httpx-backed), not just pydantic models.
+      - run: pip install pydantic==2.9.2 fastapi==0.115.5 httpx pytest pytest-cov
       - run: |
           if [ -d shared/tests ]; then
             PYTHONPATH=. pytest shared/tests -v \
@@ -275,6 +315,25 @@ jobs:
           - route-optimizer
           - signal-replay-service
           - account-link-service
+          # API plane (docs 05–06) — sandbox partner orchestration
+          - public-api-gateway
+          - developer-portal
+          - admin-console
+          - routing-service
+          - wallet-service
+          - onramp-orchestrator
+          - offramp-orchestrator
+          - settlement-status
+          - webhook-service
+          - partner-auth
+          - api-metering
+          - tenant-billing
+          # Agent governance (docs 10) + connector runtime (docs 03)
+          - approval-gate-service
+          - agent-registry
+          - agent-evals
+          - connector-runtime
+          - dashboard-api
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
