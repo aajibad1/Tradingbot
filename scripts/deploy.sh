@@ -114,7 +114,7 @@ else
     echo "  → $svc"
     # MUST target linux/amd64 — Cloud Run rejects arm64 (e.g. images built on an
     # Apple Silicon Mac). --platform forces a single-arch amd64 image.
-    docker build -q --platform linux/amd64 \
+    docker build -q --platform linux/amd64 --provenance=false \
       -f "$dockerfile" \
       -t "${REGISTRY}/${svc}:${TAG}" \
       -t "${REGISTRY}/${svc}:latest" \
