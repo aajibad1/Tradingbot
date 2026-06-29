@@ -2,7 +2,8 @@
 # A2A (Agent2Agent) smoke — proves the agent↔agent contract against LIVE services.
 # Boots all five A2A-speaking agents and exercises, over real HTTP:
 #
-#   discovery   : GET /.well-known/agent-card.json advertises each agent's skills
+#   discovery   : GET /.well-known/agent-card.json advertises each agent's skills;
+#                 shared discover_agents() catalogs the live roster + routes by skill
 #   message/send: debate (verify-claim), approval-gate (evaluate-action),
 #                 agent-evals (eval-verdict), agent-registry (resolve-active-version)
 #   invariants  : ai-ops NEVER-tier tools are neither advertised nor invocable;
@@ -101,6 +102,24 @@ check_card "$GATE"   approval-gate-service evaluate-action
 check_card "$EVALS"  agent-evals eval-verdict
 check_card "$REG"    agent-registry resolve-active-version
 check_card "$OPS"    ai-ops-agent get_balances
+
+# ── 1b) roster-wide discovery: the shared library catalogs the LIVE agents ───
+note "1b) shared discover_agents() catalogs the live roster + routes by skill"
+DISC=$(env -u GCP_PROJECT_ID \
+  A2A_DEBATE_SERVICE_URL="$L:$DEBATE" \
+  A2A_APPROVAL_GATE_SERVICE_URL="$L:$GATE" \
+  A2A_AGENT_REGISTRY_URL="$L:$REG" \
+  A2A_AGENT_EVALS_URL="$L:$EVALS" \
+  A2A_AI_OPS_AGENT_URL="$L:$OPS" \
+  PYTHONPATH="$REPO_ROOT" python3 -c "
+from shared.a2a import discover_agents, find_agents_with_skill
+cards = discover_agents()
+verify = find_agents_with_skill('verify-claim')
+print(len(cards), 'debate-service' in cards, ','.join(verify))")
+read -r NCARDS HAS_DEBATE VERIFY <<<"$DISC"
+[[ "$NCARDS" == 5 ]] && ok "discover_agents() cataloged all 5 live agents" || bad "expected 5 cards, got $NCARDS"
+[[ "$HAS_DEBATE" == True ]] && ok "debate-service present in the catalog" || bad "debate-service missing from catalog"
+[[ "$VERIFY" == debate-service ]] && ok "find_agents_with_skill(verify-claim) → debate-service" || bad "expected debate-service, got '$VERIFY'"
 
 # ── 2) debate: verify a claim → calibrated verdict task ──────────────────────
 note "2) debate-service: message/send → verdict task"
