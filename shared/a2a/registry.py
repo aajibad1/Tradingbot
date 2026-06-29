@@ -46,3 +46,39 @@ def base_url(name: str) -> str:
 def client_for(name: str, **kwargs) -> A2AClient:
     """A2AClient pointed at the named agent (convenience over ``base_url``)."""
     return A2AClient(base_url(name), **kwargs)
+
+
+def discover_agents(names=None, *, client_factory=None) -> dict:
+    """Fetch the agent-card of every roster agent (or a given subset) and return
+    ``{name: AgentCard}`` for those that answer.
+
+    Discovery is best-effort: an agent that is down, slow, or returns a malformed
+    card is omitted rather than raising — the same fail-soft stance the rest of the
+    platform takes toward a missing peer. A typo, however, fails loud: an unknown
+    agent name raises ``KeyError`` (via ``base_url``) instead of being swallowed.
+
+    ``client_factory`` (name -> A2AClient) is an injection point for tests, letting
+    them point discovery at in-process apps without a live server; defaults to
+    ``client_for``."""
+    factory = client_factory or client_for
+    roster = sorted(A2A_AGENTS) if names is None else list(names)
+    cards: dict = {}
+    for name in roster:
+        try:
+            cards[name] = factory(name).fetch_card()
+        except KeyError:
+            raise  # unknown agent — a programming typo, not a transient outage
+        except Exception:
+            continue  # unreachable / malformed card — best-effort, skip it
+    return cards
+
+
+def find_agents_with_skill(skill_id: str, *, names=None, client_factory=None) -> list:
+    """Names of roster agents whose card advertises a skill with ``skill_id`` — route
+    a request to whoever can handle it instead of hardcoding the peer. Returns a
+    sorted list; best-effort, so unreachable agents simply don't appear."""
+    cards = discover_agents(names=names, client_factory=client_factory)
+    return sorted(
+        name for name, card in cards.items()
+        if any(skill.id == skill_id for skill in card.skills)
+    )

@@ -32,7 +32,13 @@ from .models import (
     rpc_result,
     text_part,
 )
-from .registry import A2A_AGENTS, base_url, client_for
+from .registry import (
+    A2A_AGENTS,
+    base_url,
+    client_for,
+    discover_agents,
+    find_agents_with_skill,
+)
 from .server import AGENT_CARD_PATH, Handler, install_a2a
 from .store import InMemoryTaskStore
 
@@ -45,4 +51,5 @@ __all__ = [
     "InMemoryTaskStore",
     "A2AClient", "A2AError", "errors",
     "base_url", "client_for", "A2A_AGENTS",
+    "discover_agents", "find_agents_with_skill",
 ]

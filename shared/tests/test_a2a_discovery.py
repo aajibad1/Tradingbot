@@ -18,7 +18,9 @@ from shared.a2a import (
     base_url,
     client_for,
     data_part,
+    discover_agents,
     errors,
+    find_agents_with_skill,
     install_a2a,
     text_part,
 )
@@ -103,3 +105,79 @@ def test_client_get_and_cancel_task():
     with pytest.raises(A2AError) as ei:
         client.cancel_task(tid)  # completed → not cancelable
     assert ei.value.code == errors.TASK_NOT_CANCELABLE
+
+
+# --- roster-wide discovery (discover_agents / find_agents_with_skill) ----------
+def _card_client(name: str, skill_ids):
+    """In-process A2AClient whose card advertises the given skills — same ASGI-via-
+    MockTransport bridge as ``_peer_client``, parameterized per agent."""
+    app = FastAPI()
+    card = AgentCard(
+        name=name, description="d", url=f"http://{name}/a2a", version="1.0",
+        skills=[AgentSkill(id=s, name=s, description=s) for s in skill_ids],
+    )
+    install_a2a(app, card=card, handler=lambda m: [text_part("ok")])
+    tc = TestClient(app)
+
+    def _delegate(request: httpx.Request) -> httpx.Response:
+        r = tc.request(request.method, request.url.path,
+                       content=request.content, headers=request.headers)
+        return httpx.Response(r.status_code, content=r.content,
+                              headers={"content-type": r.headers.get("content-type",
+                                                                     "application/json")})
+
+    return A2AClient(f"http://{name}", transport=httpx.MockTransport(_delegate))
+
+
+def _roster_factory(skills_by_name, *, unreachable=()):
+    """Build a client_factory over a fake roster. Names in ``unreachable`` raise a
+    transport error on card fetch (agent down); others serve their advertised card."""
+    clients = {n: _card_client(n, ids) for n, ids in skills_by_name.items()}
+
+    def factory(name):
+        if name in unreachable:
+            def _boom(request):  # connection refused on the card fetch
+                raise httpx.ConnectError("down")
+            return A2AClient(f"http://{name}", transport=httpx.MockTransport(_boom))
+        return clients[name]
+
+    return factory
+
+
+def test_discover_agents_returns_each_reachable_card():
+    factory = _roster_factory({"debate-service": ["verify-claim"],
+                               "agent-evals": ["eval-verdict"]})
+    cards = discover_agents(names=["debate-service", "agent-evals"], client_factory=factory)
+    assert set(cards) == {"debate-service", "agent-evals"}
+    assert cards["debate-service"].skills[0].id == "verify-claim"
+
+
+def test_discover_agents_skips_unreachable_best_effort():
+    factory = _roster_factory({"debate-service": ["verify-claim"], "agent-evals": []},
+                              unreachable=["agent-evals"])
+    cards = discover_agents(names=["debate-service", "agent-evals"], client_factory=factory)
+    assert set(cards) == {"debate-service"}  # the down agent is omitted, not raised
+
+
+def test_discover_agents_unknown_name_fails_loud():
+    # default factory (client_for) resolves via base_url, which rejects a typo
+    with pytest.raises(KeyError):
+        discover_agents(names=["no-such-agent"])
+
+
+def test_discover_agents_defaults_to_full_roster():
+    # no names → every A2A_AGENTS member is attempted; with no real servers up they
+    # are all unreachable, so the result is empty rather than an error.
+    assert discover_agents() == {}
+
+
+def test_find_agents_with_skill_routes_by_capability():
+    factory = _roster_factory({
+        "debate-service": ["verify-claim"],
+        "approval-gate-service": ["evaluate-action"],
+        "agent-evals": ["eval-verdict", "verify-claim"],
+    })
+    names = ["debate-service", "approval-gate-service", "agent-evals"]
+    found = find_agents_with_skill("verify-claim", names=names, client_factory=factory)
+    assert found == ["agent-evals", "debate-service"]  # sorted; gate excluded
+    assert find_agents_with_skill("nope", names=names, client_factory=factory) == []
