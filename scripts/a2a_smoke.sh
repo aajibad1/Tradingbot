@@ -17,6 +17,7 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Default ports match shared/a2a/registry.py so client_for(name) would resolve here.
 DEBATE=${DEBATE:-8340} GATE=${GATE:-8341} REG=${REG:-8342} EVALS=${EVALS:-8343} OPS=${OPS:-8344}
+CORRIDOR=${CORRIDOR:-8345}   # an A2A *consumer* (not an agent): consults debate
 LOG_DIR="$(mktemp -d)"
 PIDS=()
 FAILS=0
@@ -76,11 +77,15 @@ start approval-gate-service  "$GATE"
 start agent-evals            "$EVALS"
 start agent-registry         "$REG" A2A_AGENT_EVALS_URL="$L:$EVALS"
 start ai-ops-agent           "$OPS"
+# corridor-intelligence is an A2A consumer: point it at debate-service so /assess
+# adversarially-verifies the reliability claim over A2A.
+start corridor-intelligence-service "$CORRIDOR" A2A_DEBATE_SERVICE_URL="$L:$DEBATE"
 wait_healthy debate-service "$DEBATE"
 wait_healthy approval-gate-service "$GATE"
 wait_healthy agent-evals "$EVALS"
 wait_healthy agent-registry "$REG"
 wait_healthy ai-ops-agent "$OPS"
+wait_healthy corridor-intelligence-service "$CORRIDOR"
 
 # ── 1) discovery: every agent advertises a card + skills ─────────────────────
 note "1) discovery: Agent Cards advertise skills"
@@ -137,9 +142,17 @@ note "6) agent-registry: resolve-active-version over A2A"
 AV=$(send_data "$REG" '{"agent":"ranker"}' | rpc_dkey active)
 [[ "$AV" == v1 ]] && ok "resolve-active-version → v1" || bad "expected v1, got $AV"
 
+note "7) corridor-intelligence → debate verification (consumer over A2A)"
+DV=$(curl -s "$L:$CORRIDOR/assess" -H 'content-type: application/json' -d '{"corridor":"NGN->ZAR"}' \
+  | python3 -c "import sys,json;print((json.load(sys.stdin).get('debate') or {}).get('decision',''))")
+case " support reject uncertain " in
+  *" $DV "*) ok "corridor /assess attached a debate verdict over A2A (decision=$DV)";;
+  *) bad "expected a debate verdict on /assess, got '$DV'";;
+esac
+
 note "Verdict"
 if [[ "$FAILS" -eq 0 ]]; then
-  ok "A2A holds: discovery + message/send across 5 agents; invariants + consumer path."
+  ok "A2A holds: discovery + message/send across 5 agents; invariants + 2 consumer paths (registry→evals, corridor→debate)."
   exit 0
 else
   bad "$FAILS assertion(s) failed — see logs in $LOG_DIR."; exit 1
