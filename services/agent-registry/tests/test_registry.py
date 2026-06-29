@@ -111,3 +111,36 @@ def test_activation_fail_closed_when_evals_unreachable(client, monkeypatch):
     monkeypatch.setattr(main, "A2AClient", _Down)
     r = client.post("/v1/agents/ranker/activate", json={"version": "v1"})
     assert r.status_code == 409 and "unreachable" in r.json()["error"]["message"]
+
+
+def test_eval_peer_discovered_by_skill_when_env_unset(client, monkeypatch):
+    # No explicit env (client fixture cleared both) → the registry must DISCOVER the
+    # eval authority by capability and still gate on its verdict.
+    seen = {}
+
+    def _fake_discovery(skill_id, **kwargs):
+        seen["skill"] = skill_id
+        return ["agent-evals"]
+
+    monkeypatch.setattr(main, "find_agents_with_skill", _fake_discovery)
+    _agent(client)
+    client.post("/v1/agents/ranker/prompts", json={"version": "v1", "content": "x"})
+    _stub_evals(monkeypatch, {"passed": True})
+    r = client.post("/v1/agents/ranker/activate", json={"version": "v1"})
+    assert r.status_code == 200 and r.json()["active"] == "v1"
+    assert seen["skill"] == "eval-verdict"  # routed by the eval-verdict capability
+
+
+def test_explicit_env_skips_discovery(client, monkeypatch):
+    # An explicit env must WIN — discovery is never consulted (pinning / back-compat).
+    monkeypatch.setenv("A2A_AGENT_EVALS_URL", "http://agent-evals/a2a")
+
+    def _boom(*a, **k):
+        raise AssertionError("discovery must not run when env is set")
+
+    monkeypatch.setattr(main, "find_agents_with_skill", _boom)
+    _agent(client)
+    client.post("/v1/agents/ranker/prompts", json={"version": "v1", "content": "x"})
+    _stub_evals(monkeypatch, {"passed": True})
+    r = client.post("/v1/agents/ranker/activate", json={"version": "v1"})
+    assert r.status_code == 200 and r.json()["active"] == "v1"

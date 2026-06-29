@@ -40,7 +40,9 @@ from shared.a2a import (
     AgentSkill,
     Message,
     base_url,
+    client_for,
     data_part,
+    find_agents_with_skill,
     install_a2a,
     text_part,
 )
@@ -137,13 +139,30 @@ def list_prompts(name: str) -> dict[str, Any]:
     return {"agent": name, "prompts": list(agent["prompts"].values()), "active": agent["active"]}
 
 
+def _resolve_evals_base() -> str | None:
+    """Locate the eval authority's A2A base URL. An explicit env wins (back-compat
+    and deliberate pinning); otherwise discover whoever advertises the
+    ``eval-verdict`` skill on the A2A roster, so the registry routes by capability
+    rather than a hardcoded peer. Discovery is best-effort and time-bounded so a
+    dead peer can't stall an activation; returns None when neither is available
+    (sandbox/bootstrap)."""
+    explicit = os.environ.get("A2A_AGENT_EVALS_URL") or os.environ.get("AGENT_EVALS_URL")
+    if explicit:
+        return explicit
+    providers = find_agents_with_skill(
+        "eval-verdict", client_factory=lambda n: client_for(n, timeout=2.0)
+    )
+    return base_url(providers[0]) if providers else None
+
+
 def _eval_passed(agent: str, version: str) -> tuple[bool, str]:
     """Consult agent-evals for a passing verdict over A2A (the agent↔agent
-    contract). When evals isn't wired (no A2A_AGENT_EVALS_URL / AGENT_EVALS_URL)
-    we allow activation (sandbox/bootstrap). Fail-CLOSED on a reachable-but-not-
-    passing or un-evaluated version. The legacy AGENT_EVALS_URL still works: A2A's
-    endpoint lives at {base}/a2a on the same agent-evals service."""
-    base = os.environ.get("A2A_AGENT_EVALS_URL") or os.environ.get("AGENT_EVALS_URL")
+    contract). The peer is resolved by ``_resolve_evals_base`` — explicit env, else
+    capability discovery. When evals isn't wired at all we allow activation
+    (sandbox/bootstrap). Fail-CLOSED on a reachable-but-not-passing or un-evaluated
+    version. The legacy AGENT_EVALS_URL still works: A2A's endpoint lives at
+    {base}/a2a on the same agent-evals service."""
+    base = _resolve_evals_base()
     if not base:
         return True, "evals not configured (sandbox)"
     try:
