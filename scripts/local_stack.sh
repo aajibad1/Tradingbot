@@ -105,9 +105,20 @@ bring_up trade-ledger trade-ledger 8084
 bring_up opportunity-ranker opportunity-ranker 8085 "$(SQLITE opportunity-ranker)"
 bring_up route-optimizer route-optimizer 8086
 
+# Agent / intelligence plane — A2A (Agent2Agent) mesh. Ports match
+# shared/a2a/registry.py defaults so client_for(name) resolves against these
+# running services. Each serves GET /.well-known/agent-card.json + POST /a2a.
+# agent-registry consults agent-evals OVER A2A for eval-gated activation, so
+# evals is booted first and the registry is pointed at it.
+bring_up debate-service debate-service 8340
+bring_up approval-gate-service approval-gate-service 8341
+bring_up agent-evals agent-evals 8343
+bring_up agent-registry agent-registry 8342 A2A_AGENT_EVALS_URL="http://127.0.0.1:8343"
+bring_up ai-ops-agent ai-ops-agent 8344
+
 # Status aggregator LAST — point it at the mesh it just brought up so /status and
 # /slo reflect the real local services (advisory ones only DEGRADE, never DOWN).
-targets=""; noncrit="opportunity-ranker,route-optimizer,trade-ledger,opportunity-engine"
+targets=""; noncrit="opportunity-ranker,route-optimizer,trade-ledger,opportunity-engine,debate-service,approval-gate-service,agent-registry,agent-evals,ai-ops-agent"
 for entry in "${STARTED[@]}"; do
   set -- $entry; targets+="${targets:+,}$1=http://127.0.0.1:$2"
 done
@@ -121,11 +132,13 @@ printf '  %-22s %s\n' "risk-engine" "http://127.0.0.1:8082   /evaluate /state /k
 printf '  %-22s %s\n' "trade-ledger" "http://127.0.0.1:8084   /ml-export/{decisions,funnel,advisory-scorecard,route-quality}"
 printf '  %-22s %s\n' "route-optimizer" "http://127.0.0.1:8086   POST /rank"
 printf '  %-22s %s\n' "status-service" "http://127.0.0.1:8087   /status  /slo/catalog  POST /slo/evaluate"
+printf '  %-22s %s\n' "A2A agents" "debate :8340  approval-gate :8341  registry :8342  evals :8343  ai-ops :8344"
 echo
 c_info "Try it:"
 echo "  curl -s 127.0.0.1:8087/status | python3 -m json.tool"
 echo "  curl -s 127.0.0.1:8087/slo/catalog | python3 -m json.tool"
 echo "  curl -s 127.0.0.1:8080/healthz"
+echo "  curl -s 127.0.0.1:8340/.well-known/agent-card.json | python3 -m json.tool   # A2A discovery"
 echo "  Frontend:  cd apps/frontend && npm install && npm run dev   (expects core-api on :8080)"
 echo
 c_info "Press Ctrl-C to stop."
