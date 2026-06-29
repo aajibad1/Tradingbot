@@ -220,7 +220,10 @@ jobs:
           if [ -f services/${{ matrix.service }}/requirements.txt ]; then
             pip install -r services/${{ matrix.service }}/requirements.txt
           fi
-          pip install pytest pytest-cov pytest-asyncio
+          # httpx is a test-only dep (FastAPI/Starlette TestClient) some services
+          # use without it being a runtime requirement — install it universally so
+          # the suite doesn't depend on a service transitively pulling it in.
+          pip install pytest pytest-cov pytest-asyncio httpx
       - name: Run tests
         env:
           PYTHONPATH: ".:services/${{ matrix.service }}"
