@@ -54,3 +54,35 @@ def test_empty_verdict_is_ignored(monkeypatch):
     _stub_debate(monkeypatch, {})  # no decision → no annotation
     out = client.post("/assess", json={"corridor": "NGN->ZAR"}).json()
     assert "debate" not in out
+
+
+def test_discovery_opt_in_routes_by_verify_claim(monkeypatch):
+    # No explicit URL, but discovery is opted in → route to whoever advertises
+    # the verify-claim skill, then attach its verdict.
+    monkeypatch.delenv("A2A_DEBATE_SERVICE_URL", raising=False)
+    monkeypatch.setenv("A2A_DISCOVER_DEBATE", "1")
+    seen = {}
+
+    def _fake_discovery(skill_id, **kwargs):
+        seen["skill"] = skill_id
+        return ["debate-service"]
+
+    monkeypatch.setattr(main, "find_agents_with_skill", _fake_discovery)
+    _stub_debate(monkeypatch, {"decision": "reject", "confidence": 0.6,
+                               "refuted_by": 2, "n_skeptics": 3})
+    out = client.post("/assess", json={"corridor": "NGN->ZAR"}).json()
+    assert out["debate"]["decision"] == "reject"
+    assert seen["skill"] == "verify-claim"  # routed by capability
+
+
+def test_discovery_off_by_default_even_with_provider(monkeypatch):
+    # Discovery must NOT run unless explicitly enabled — verification stays opt-in.
+    monkeypatch.delenv("A2A_DEBATE_SERVICE_URL", raising=False)
+    monkeypatch.delenv("A2A_DISCOVER_DEBATE", raising=False)
+
+    def _boom(*a, **k):
+        raise AssertionError("discovery must not run unless A2A_DISCOVER_DEBATE is set")
+
+    monkeypatch.setattr(main, "find_agents_with_skill", _boom)
+    out = client.post("/assess", json={"corridor": "NGN->ZAR"}).json()
+    assert "debate" not in out
