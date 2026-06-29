@@ -76,7 +76,12 @@ note "Booting the 5 A2A agents"
 start debate-service         "$DEBATE"
 start approval-gate-service  "$GATE"
 start agent-evals            "$EVALS"
-start agent-registry         "$REG" A2A_AGENT_EVALS_URL="$L:$EVALS"
+start agent-registry         "$REG" \
+  A2A_AGENT_EVALS_URL="$L:$EVALS" \
+  A2A_DEBATE_SERVICE_URL="$L:$DEBATE" \
+  A2A_APPROVAL_GATE_SERVICE_URL="$L:$GATE" \
+  A2A_AGENT_REGISTRY_URL="$L:$REG" \
+  A2A_AI_OPS_AGENT_URL="$L:$OPS"
 start ai-ops-agent           "$OPS"
 # corridor-intelligence is an A2A consumer: point it at debate-service so /assess
 # adversarially-verifies the reliability claim over A2A.
@@ -120,6 +125,11 @@ read -r NCARDS HAS_DEBATE VERIFY <<<"$DISC"
 [[ "$NCARDS" == 5 ]] && ok "discover_agents() cataloged all 5 live agents" || bad "expected 5 cards, got $NCARDS"
 [[ "$HAS_DEBATE" == True ]] && ok "debate-service present in the catalog" || bad "debate-service missing from catalog"
 [[ "$VERIFY" == debate-service ]] && ok "find_agents_with_skill(verify-claim) → debate-service" || bad "expected debate-service, got '$VERIFY'"
+# the agent-registry projects the same catalog over plain HTTP (browsable / ops view)
+CAT=$(curl -s "$L:$REG/v1/a2a/catalog" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['count'], len(d['unreachable']))")
+read -r CCOUNT CUNREACH <<<"$CAT"
+[[ "$CCOUNT" == 5 ]] && ok "GET /v1/a2a/catalog lists all 5 live agents" || bad "catalog count=$CCOUNT (expected 5)"
+[[ "$CUNREACH" == 0 ]] && ok "catalog reports 0 unreachable" || bad "catalog unreachable=$CUNREACH (expected 0)"
 
 # ── 2) debate: verify a claim → calibrated verdict task ──────────────────────
 note "2) debate-service: message/send → verdict task"

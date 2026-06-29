@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import main
 from fastapi.testclient import TestClient
+from shared.a2a import A2A_AGENTS, AgentCard, AgentSkill
 
 client = TestClient(main.app)
 
@@ -42,3 +43,27 @@ def test_resolve_via_plain_text_name():
 def test_unknown_agent_is_invalid_params():
     r = _resolve({"agent": "ghost-agent"}, req_id="3")
     assert r["error"]["code"] == -32602
+
+
+# --- A2A roster catalog -------------------------------------------------------
+def test_catalog_lists_unreachable_when_no_peers_up(monkeypatch):
+    # No agents are actually serving in-process → best-effort discovery yields an
+    # empty catalog, and every roster member is reported unreachable (an ops view).
+    monkeypatch.setattr(main, "discover_agents", lambda **k: {})
+    body = client.get("/v1/a2a/catalog").json()
+    assert body["count"] == 0 and body["agents"] == []
+    assert body["roster"] == sorted(A2A_AGENTS)
+    assert body["unreachable"] == sorted(A2A_AGENTS)
+
+
+def test_catalog_projects_discovered_cards(monkeypatch):
+    card = AgentCard(name="debate-service", description="adversarial verification",
+                     url="http://debate/a2a", version="1.0",
+                     skills=[AgentSkill(id="verify-claim", name="Verify", description="d")])
+    monkeypatch.setattr(main, "discover_agents", lambda **k: {"debate-service": card})
+    body = client.get("/v1/a2a/catalog").json()
+    assert body["count"] == 1
+    entry = body["agents"][0]
+    assert entry["name"] == "debate-service" and entry["url"] == "http://debate/a2a"
+    assert entry["skills"][0]["id"] == "verify-claim"
+    assert "debate-service" not in body["unreachable"]  # reachable → not listed down
