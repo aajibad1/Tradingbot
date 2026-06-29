@@ -1,5 +1,6 @@
 steps:
   - name: 'gcr.io/cloud-builders/docker'
+    env: ['DOCKER_BUILDKIT=0']
     args: ['build', '-f', 'services/${_SVC}/Dockerfile', '-t', '${_IMG}', '.']
 images: ['${_IMG}']
 options:
