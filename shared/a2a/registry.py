@@ -82,3 +82,23 @@ def find_agents_with_skill(skill_id: str, *, names=None, client_factory=None) ->
         name for name, card in cards.items()
         if any(skill.id == skill_id for skill in card.skills)
     )
+
+
+def roster_catalog(*, names=None, client_factory=None) -> dict:
+    """A browsable projection of the live A2A roster — discover every agent's card
+    and return ``{agents, count, roster, unreachable}``. ``agents`` carries each
+    reachable agent's name/description/version/url/skills; ``unreachable`` lists the
+    roster members that didn't answer (an ops view). Best-effort, like
+    ``discover_agents``. The single place the catalog shape is defined, so every
+    surface that exposes the mesh (registry endpoint, status page) agrees."""
+    cards = discover_agents(names=names, client_factory=client_factory)
+    agents = [
+        {"name": name, "description": card.description, "version": card.version,
+         "url": card.url,
+         "skills": [{"id": s.id, "name": s.name, "description": s.description}
+                    for s in card.skills]}
+        for name, card in sorted(cards.items())
+    ]
+    roster = sorted(A2A_AGENTS) if names is None else sorted(names)
+    return {"agents": agents, "count": len(agents), "roster": roster,
+            "unreachable": sorted(n for n in roster if n not in cards)}

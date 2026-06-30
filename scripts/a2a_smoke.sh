@@ -19,6 +19,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Default ports match shared/a2a/registry.py so client_for(name) would resolve here.
 DEBATE=${DEBATE:-8340} GATE=${GATE:-8341} REG=${REG:-8342} EVALS=${EVALS:-8343} OPS=${OPS:-8344}
 CORRIDOR=${CORRIDOR:-8345}   # an A2A *consumer* (not an agent): consults debate
+STATUS=${STATUS:-8347}       # status-service: surfaces the live roster at /a2a/roster
 LOG_DIR="$(mktemp -d)"
 PIDS=()
 FAILS=0
@@ -86,12 +87,21 @@ start ai-ops-agent           "$OPS"
 # corridor-intelligence is an A2A consumer: point it at debate-service so /assess
 # adversarially-verifies the reliability claim over A2A.
 start corridor-intelligence-service "$CORRIDOR" A2A_DEBATE_SERVICE_URL="$L:$DEBATE"
+# status-service is an A2A *consumer*: /a2a/roster surfaces the live mesh. Point it
+# at every agent so roster_catalog resolves the booted ports regardless of overrides.
+start status-service "$STATUS" \
+  A2A_DEBATE_SERVICE_URL="$L:$DEBATE" \
+  A2A_APPROVAL_GATE_SERVICE_URL="$L:$GATE" \
+  A2A_AGENT_REGISTRY_URL="$L:$REG" \
+  A2A_AGENT_EVALS_URL="$L:$EVALS" \
+  A2A_AI_OPS_AGENT_URL="$L:$OPS"
 wait_healthy debate-service "$DEBATE"
 wait_healthy approval-gate-service "$GATE"
 wait_healthy agent-evals "$EVALS"
 wait_healthy agent-registry "$REG"
 wait_healthy ai-ops-agent "$OPS"
 wait_healthy corridor-intelligence-service "$CORRIDOR"
+wait_healthy status-service "$STATUS"
 
 # ── 1) discovery: every agent advertises a card + skills ─────────────────────
 note "1) discovery: Agent Cards advertise skills"
@@ -130,6 +140,10 @@ CAT=$(curl -s "$L:$REG/v1/a2a/catalog" | python3 -c "import sys,json;d=json.load
 read -r CCOUNT CUNREACH <<<"$CAT"
 [[ "$CCOUNT" == 5 ]] && ok "GET /v1/a2a/catalog lists all 5 live agents" || bad "catalog count=$CCOUNT (expected 5)"
 [[ "$CUNREACH" == 0 ]] && ok "catalog reports 0 unreachable" || bad "catalog unreachable=$CUNREACH (expected 0)"
+# status-service surfaces the same live roster at /a2a/roster (ops mesh view)
+ROST=$(curl -s "$L:$STATUS/a2a/roster" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['count'], d['status'])")
+read -r RCOUNT RSTATUS <<<"$ROST"
+[[ "$RCOUNT" == 5 && "$RSTATUS" == ok ]] && ok "status-service /a2a/roster → 5 agents, status ok" || bad "roster count=$RCOUNT status=$RSTATUS (expected 5/ok)"
 
 # ── 2) debate: verify a claim → calibrated verdict task ──────────────────────
 note "2) debate-service: message/send → verdict task"

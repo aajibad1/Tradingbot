@@ -123,3 +123,26 @@ def test_slo_evaluate_ignores_malformed_and_unknown():
     }})
     assert r.status_code == 200
     assert set(r.json()["slos"]) == {"control_plane_availability"}
+
+
+def test_a2a_roster_degraded_when_some_agents_down(monkeypatch):
+    from fastapi.testclient import TestClient
+    monkeypatch.setattr(main, "roster_catalog", lambda **k: {
+        "agents": [{"name": "debate-service", "description": "d", "version": "1.0",
+                    "url": "http://debate/a2a",
+                    "skills": [{"id": "verify-claim", "name": "V", "description": "d"}]}],
+        "count": 1, "roster": ["agent-evals", "debate-service"],
+        "unreachable": ["agent-evals"]})
+    r = TestClient(main.app).get("/a2a/roster")
+    assert r.status_code == 200  # advisory mesh view never gates
+    body = r.json()
+    assert body["status"] == "degraded" and body["unreachable"] == ["agent-evals"]
+    assert body["agents"][0]["skills"][0]["id"] == "verify-claim"
+
+
+def test_a2a_roster_ok_when_all_present(monkeypatch):
+    from fastapi.testclient import TestClient
+    monkeypatch.setattr(main, "roster_catalog", lambda **k: {
+        "agents": [], "count": 0, "roster": ["debate-service"], "unreachable": []})
+    body = TestClient(main.app).get("/a2a/roster").json()
+    assert body["status"] == "ok"
