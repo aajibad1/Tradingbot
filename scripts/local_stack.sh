@@ -122,8 +122,15 @@ targets=""; noncrit="opportunity-ranker,route-optimizer,trade-ledger,opportunity
 for entry in "${STARTED[@]}"; do
   set -- $entry; targets+="${targets:+,}$1=http://127.0.0.1:$2"
 done
+# Also point it at the A2A mesh so /a2a/roster resolves the booted agents
+# regardless of port choices (defaults already match, but explicit is clearer).
 bring_up status-service status-service 8087 \
-  STATUS_TARGETS="$targets" STATUS_NONCRITICAL="$noncrit"
+  STATUS_TARGETS="$targets" STATUS_NONCRITICAL="$noncrit" \
+  A2A_DEBATE_SERVICE_URL="http://127.0.0.1:8340" \
+  A2A_APPROVAL_GATE_SERVICE_URL="http://127.0.0.1:8341" \
+  A2A_AGENT_REGISTRY_URL="http://127.0.0.1:8342" \
+  A2A_AGENT_EVALS_URL="http://127.0.0.1:8343" \
+  A2A_AI_OPS_AGENT_URL="http://127.0.0.1:8344"
 
 echo
 c_info "== Local stack is UP (${#STARTED[@]} services) =="
@@ -131,11 +138,12 @@ printf '  %-22s %s\n' "core-api" "http://127.0.0.1:8080   (onboarding, billing, 
 printf '  %-22s %s\n' "risk-engine" "http://127.0.0.1:8082   /evaluate /state /kill-switch"
 printf '  %-22s %s\n' "trade-ledger" "http://127.0.0.1:8084   /ml-export/{decisions,funnel,advisory-scorecard,route-quality}"
 printf '  %-22s %s\n' "route-optimizer" "http://127.0.0.1:8086   POST /rank"
-printf '  %-22s %s\n' "status-service" "http://127.0.0.1:8087   /status  /slo/catalog  POST /slo/evaluate"
+printf '  %-22s %s\n' "status-service" "http://127.0.0.1:8087   /status  /a2a/roster  /slo/catalog  POST /slo/evaluate"
 printf '  %-22s %s\n' "A2A agents" "debate :8340  approval-gate :8341  registry :8342  evals :8343  ai-ops :8344"
 echo
 c_info "Try it:"
 echo "  curl -s 127.0.0.1:8087/status | python3 -m json.tool"
+echo "  curl -s 127.0.0.1:8087/a2a/roster | python3 -m json.tool          # live A2A mesh view"
 echo "  curl -s 127.0.0.1:8087/slo/catalog | python3 -m json.tool"
 echo "  curl -s 127.0.0.1:8080/healthz"
 echo "  curl -s 127.0.0.1:8340/.well-known/agent-card.json | python3 -m json.tool   # A2A discovery"
