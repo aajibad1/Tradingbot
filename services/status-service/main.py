@@ -11,6 +11,7 @@ Config (env):
 Endpoints:
   GET  /healthz      — this service's own liveness
   GET  /status       — aggregated platform status
+  GET  /a2a/roster   — live A2A mesh view (which agents answer + advertised skills)
   GET  /slo/catalog  — documented SLO targets (machine-readable)
   POST /slo/evaluate — error-budget + burn-rate verdict for observed counts
 """
@@ -24,6 +25,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from shared.a2a import client_for, roster_catalog
 from shared.health import Component, HealthStatus, build_report, run_check
 from shared.http import install_contract
 from shared.slo import DEFAULT_SLOS, SLOSeverity, evaluate_all, worst_severity
@@ -91,6 +93,18 @@ def status() -> JSONResponse:
     # is, by definition, still serving.
     code = 503 if report.status is HealthStatus.DOWN else 200
     return JSONResponse(report.to_dict(), status_code=code)
+
+
+@app.get("/a2a/roster")
+def a2a_roster() -> JSONResponse:
+    """Live A2A mesh view: which agents are answering and the skills they advertise.
+    Complements /status (which probes /healthz) by reading each agent's advertised
+    capability card. Best-effort and time-bounded (2s/peer) so a dead agent can't
+    stall the page. Advisory — always 200; ``status`` is ``ok`` when the whole
+    roster answers, else ``degraded`` (the unreachable members are named)."""
+    cat = roster_catalog(client_factory=lambda n: client_for(n, timeout=2.0))
+    cat["status"] = "ok" if not cat["unreachable"] else "degraded"
+    return JSONResponse(cat)
 
 
 @app.get("/slo/catalog")

@@ -38,6 +38,7 @@ from .registry import (
     client_for,
     discover_agents,
     find_agents_with_skill,
+    roster_catalog,
 )
 from .server import AGENT_CARD_PATH, Handler, install_a2a
 from .store import InMemoryTaskStore
@@ -51,5 +52,5 @@ __all__ = [
     "InMemoryTaskStore",
     "A2AClient", "A2AError", "errors",
     "base_url", "client_for", "A2A_AGENTS",
-    "discover_agents", "find_agents_with_skill",
+    "discover_agents", "find_agents_with_skill", "roster_catalog",
 ]

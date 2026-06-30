@@ -22,6 +22,7 @@ from shared.a2a import (
     errors,
     find_agents_with_skill,
     install_a2a,
+    roster_catalog,
     text_part,
 )
 
@@ -181,3 +182,15 @@ def test_find_agents_with_skill_routes_by_capability():
     found = find_agents_with_skill("verify-claim", names=names, client_factory=factory)
     assert found == ["agent-evals", "debate-service"]  # sorted; gate excluded
     assert find_agents_with_skill("nope", names=names, client_factory=factory) == []
+
+
+def test_roster_catalog_projects_cards_and_flags_unreachable():
+    names = ["debate-service", "agent-evals"]
+    factory = _roster_factory({"debate-service": ["verify-claim"], "agent-evals": []},
+                              unreachable=["agent-evals"])
+    cat = roster_catalog(names=names, client_factory=factory)
+    assert cat["count"] == 1
+    assert [a["name"] for a in cat["agents"]] == ["debate-service"]
+    assert cat["agents"][0]["skills"][0]["id"] == "verify-claim"
+    assert cat["roster"] == sorted(names)
+    assert cat["unreachable"] == ["agent-evals"]  # down → listed, not raised

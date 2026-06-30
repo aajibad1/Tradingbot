@@ -34,7 +34,6 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 from shared.a2a import (
-    A2A_AGENTS,
     A2AClient,
     A2AError,
     AgentCard,
@@ -44,9 +43,9 @@ from shared.a2a import (
     base_url,
     client_for,
     data_part,
-    discover_agents,
     find_agents_with_skill,
     install_a2a,
+    roster_catalog,
     text_part,
 )
 from shared.a2a import errors as a2a_errors
@@ -121,17 +120,7 @@ def a2a_catalog() -> dict[str, Any]:
     listed under ``unreachable`` rather than failing the request — so this doubles
     as an ops view of which agents are answering. Distinct from ``/v1/agents``,
     which lists this registry's governance-versioned agents, not the live A2A mesh."""
-    cards = discover_agents(client_factory=lambda n: client_for(n, timeout=2.0))
-    agents = [
-        {"name": name, "description": card.description, "version": card.version,
-         "url": card.url,
-         "skills": [{"id": s.id, "name": s.name, "description": s.description}
-                    for s in card.skills]}
-        for name, card in sorted(cards.items())
-    ]
-    return {"agents": agents, "count": len(agents),
-            "roster": sorted(A2A_AGENTS),
-            "unreachable": sorted(n for n in A2A_AGENTS if n not in cards)}
+    return roster_catalog(client_factory=lambda n: client_for(n, timeout=2.0))
 
 
 @app.get("/v1/agents/{name}")
