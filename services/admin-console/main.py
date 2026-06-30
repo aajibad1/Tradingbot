@@ -13,6 +13,7 @@ Routes:
   GET /                    the console UI
   GET /healthz
   GET /admin/health        platform status (best-effort; never 502s the console)
+  GET /admin/agents        live A2A agent mesh (best-effort via status-service)
   GET /admin/keys?tenant=
   GET /admin/usage?tenant=
   GET /admin/invoices?tenant=
@@ -84,6 +85,18 @@ def health() -> dict[str, Any]:
         return {"reachable": True, "http_status": r.status_code, "report": r.json()}
     except Exception:
         return {"reachable": False, "report": None}
+
+
+@app.get("/admin/agents")
+def agents() -> dict[str, Any]:
+    """Live A2A agent mesh — BEST-EFFORT proxy of status-service /a2a/roster, so the
+    console still renders if status-service is down (reachable=false). Read-only ops
+    view of which governance/intelligence agents answer + the skills they advertise."""
+    try:
+        r = httpx.get(f"{_url('STATUS_URL')}/a2a/roster", timeout=5.0)
+        return {"reachable": True, "roster": r.json()}
+    except Exception:
+        return {"reachable": False, "roster": None}
 
 
 @app.get("/admin/keys")

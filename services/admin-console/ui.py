@@ -36,6 +36,8 @@ INDEX_HTML = """<!doctype html>
 <main>
   <section class="panel wide"><h2>Platform health (status-service)</h2><div id="health" class="muted">loading…</div></section>
 
+  <section class="panel wide"><h2>Agents (A2A mesh)</h2><div id="agents" class="muted">loading…</div></section>
+
   <section class="panel"><h2>Tenant lookup</h2>
     <div><input id="tenant" value="ten_demo"/> <button onclick="loadTenant()">Load</button></div>
     <div id="keys" style="margin-top:10px"></div>
@@ -77,7 +79,18 @@ async function loadDeliveries(){
   for(const x of d){ t+='<tr><td><code>'+x.event_type+'</code></td><td>'+x.endpoint_id+'</td><td>'+x.status+'</td><td>'+(x.response_code??'')+'</td></tr>'; }
   document.getElementById('deliveries').innerHTML = d.length? t+'</table>' : '<span class="muted">no deliveries</span>';
 }
-function refreshAll(){ loadHealth(); loadTenant(); loadDeliveries(); }
+async function loadAgents(){
+  const r=await jget('/admin/agents'); const a=document.getElementById('agents');
+  if(!r.data || r.data.reachable===false){ a.innerHTML='<span class="down">status-service unreachable</span>'; return; }
+  const m=r.data.roster||{}; const agents=m.agents||[];
+  let h='<p class="muted">'+badge(m.status||'?')+' · '+(m.count||0)+'/'+((m.roster||[]).length)+' answering</p>';
+  h+='<table><tr><th>agent</th><th>version</th><th>skills</th></tr>';
+  for(const ag of agents){ h+='<tr><td><code>'+ag.name+'</code></td><td>'+(ag.version||'?')+'</td><td>'+
+    (ag.skills||[]).map(s=>'<code>'+s.id+'</code>').join(' ')+'</td></tr>'; }
+  for(const down of (m.unreachable||[])){ h+='<tr><td><code>'+down+'</code></td><td colspan="2"><span class="down">unreachable</span></td></tr>'; }
+  a.innerHTML=h+'</table>';
+}
+function refreshAll(){ loadHealth(); loadAgents(); loadTenant(); loadDeliveries(); }
 refreshAll();
 </script>
 </body></html>"""

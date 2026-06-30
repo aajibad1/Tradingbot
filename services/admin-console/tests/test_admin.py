@@ -33,6 +33,16 @@ def env(monkeypatch):
             return _Resp(200, {"status": "degraded", "components": [
                 {"name": "redis", "status": "ok", "critical": True},
                 {"name": "ai-ops", "status": "down", "critical": False}]})
+        if url.endswith("/a2a/roster"):
+            if not state["status_up"]:
+                raise httpx.ConnectError("status down")
+            return _Resp(200, {"status": "degraded", "count": 1,
+                               "roster": ["agent-evals", "debate-service"],
+                               "unreachable": ["agent-evals"],
+                               "agents": [{"name": "debate-service", "version": "1.0",
+                                           "description": "verify", "url": "http://debate/a2a",
+                                           "skills": [{"id": "verify-claim", "name": "V",
+                                                       "description": "d"}]}]})
         if url.endswith("/v1/partner/keys"):
             return _Resp(200, {"keys": [{"key_id": "pk_sandbox_x", "scopes": ["onramp"], "active": True}]})
         if url.endswith("/v1/metering/usage"):
@@ -85,3 +95,19 @@ def test_unreachable_oversight_upstream_502(client, monkeypatch):
     monkeypatch.setattr(httpx, "get", boom)
     r = client.get("/admin/usage", params={"tenant": "ten_1"})
     assert r.status_code == 502 and r.json()["error"]["code"] == "upstream_unreachable"
+
+
+def test_agents_proxies_status_roster(client):
+    r = client.get("/admin/agents").json()
+    assert r["reachable"] is True
+    m = r["roster"]
+    assert m["status"] == "degraded" and m["count"] == 1
+    assert m["agents"][0]["skills"][0]["id"] == "verify-claim"
+    assert m["unreachable"] == ["agent-evals"]
+
+
+def test_agents_best_effort_when_status_down(client):
+    client.state["status_up"] = False
+    r = client.get("/admin/agents")
+    # console must still load: reachable=false, not a 502
+    assert r.status_code == 200 and r.json()["reachable"] is False
