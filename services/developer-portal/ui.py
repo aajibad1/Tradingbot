@@ -83,6 +83,11 @@ INDEX_HTML = """<!doctype html>
     <h2>API catalog</h2>
     <div id="catalog" class="muted">loading…</div>
   </section>
+
+  <section class="panel">
+    <h2>Agents (A2A mesh)</h2>
+    <div id="agents" class="muted">loading…</div>
+  </section>
 </main>
 <script>
 async function jpost(url, body){ const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}); return {status:r.status, data:await r.json()}; }
@@ -125,7 +130,21 @@ async function loadCatalog(){
   }
   c.innerHTML=h||'no services';
 }
-listKeys(); loadCatalog();
+async function loadAgents(){
+  const a=document.getElementById('agents');
+  const r=await jget('/portal/agents'); const d=r.data||{};
+  if(!Array.isArray(d.agents)){ a.textContent='agent mesh unavailable'; return; }
+  let h='<p class="muted">status: <b>'+(d.status||'?')+'</b> · '+(d.count||0)+'/'+((d.roster||[]).length)+' answering</p>';
+  for(const ag of d.agents){
+    const skills=(ag.skills||[]).map(s=>'<code>'+s.id+'</code>').join(' ');
+    h+='<p style="margin:10px 0 2px"><b>'+ag.name+'</b> <span class="muted">v'+(ag.version||'?')+'</span></p>';
+    h+='<div class="muted">'+(ag.description||'')+'</div>';
+    if(skills) h+='<div style="margin-top:3px">'+skills+'</div>';
+  }
+  for(const down of (d.unreachable||[])){ h+='<p style="margin:8px 0 0"><b>'+down+'</b> <span class="muted">— unreachable</span></p>'; }
+  a.innerHTML=h;
+}
+listKeys(); loadCatalog(); loadAgents();
 </script>
 </body>
 </html>"""

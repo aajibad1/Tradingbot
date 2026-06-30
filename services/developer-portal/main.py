@@ -18,6 +18,7 @@ Routes:
   POST /portal/keys/{id}/revoke
   POST /portal/proxy           run an API call through the gateway with a token
   GET  /portal/services        API catalog (from docs/api-catalog/*.openapi.json)
+  GET  /portal/agents          live A2A agent catalog (skills + reachability)
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
+from shared.a2a import client_for, roster_catalog
 from shared.http import APIError, install_contract
 from ui import INDEX_HTML
 
@@ -139,6 +141,18 @@ def try_api(req: ProxyCall) -> dict[str, Any]:
     status, data = _proxy(req.method.upper(), url, json_body=req.body,
                           headers={"authorization": f"Bearer {req.token}"})
     return {"status": status, "response": data}
+
+
+@app.get("/portal/agents")
+def agents() -> dict[str, Any]:
+    """Live A2A agent catalog — which governance/intelligence agents are answering
+    and the skills they advertise (from each agent's published card). Best-effort
+    and time-bounded (2s/peer): a down agent is listed under ``unreachable`` rather
+    than failing the page. ``status`` is ``ok`` when the whole roster answers, else
+    ``degraded``."""
+    cat = roster_catalog(client_factory=lambda n: client_for(n, timeout=2.0))
+    cat["status"] = "ok" if not cat["unreachable"] else "degraded"
+    return cat
 
 
 @app.get("/portal/services")
