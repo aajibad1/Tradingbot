@@ -57,6 +57,17 @@ Defines how the multi-agent system behaves safely in production.
   skills nor invocable, and withdrawals/leverage stay hard-blocked. Handlers are
   fail-soft (errors become JSON-RPC errors, never a crash). Peers resolve each
   other via the registry (`client_for(name)`; `A2A_<NAME>_URL` override).
+- **A2A discovery + capability routing** — `shared/a2a` (`discover_agents`,
+  `find_agents_with_skill`, `roster_catalog`): roster-wide discovery fetches every
+  agent's card (best-effort — a down agent is omitted; an unknown name fails loud)
+  so a caller can route by *capability* instead of a hardcoded peer. Consumers keep
+  their contract: `agent-registry` finds the eval authority (`eval-verdict`) as a
+  fallback when `A2A_AGENT_EVALS_URL` is unset; `corridor-intelligence-service`
+  finds the debate agent (`verify-claim`) opt-in via `A2A_DISCOVER_DEBATE`. The one
+  `roster_catalog` projection is exposed as a browsable mesh view on three surfaces —
+  `agent-registry` `GET /v1/a2a/catalog`, `status-service` `GET /a2a/roster`, and the
+  developer-portal / admin-console "Agents (A2A mesh)" panels. Discovery is
+  time-bounded (2s/peer) so a dead agent can't stall a request.
 
 Still to build (gated — only once the advisory loop is proven live): the autonomous
 agent orchestrator and scoped agent-memory.
