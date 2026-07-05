@@ -118,5 +118,16 @@ echo "  Status           : $L:$STATUS/status   ·   A2A mesh: $L:$STATUS/a2a/ros
 echo "  A2A agents       : debate :$DEBATE  gate :$GATE  registry :$REG  evals :$EVALS  ai-ops :$OPS"
 echo
 echo "Open the Developer Portal to issue a sandbox key and try the API. Ctrl-C to stop."
-[ "${SMOKE:-}" = "1" ] && { ok "SMOKE=1 — all healthy; exiting."; exit 0; }
+if [ "${SMOKE:-}" = "1" ]; then
+  # Functional check of the A2A mesh panels (not just /healthz): the portal
+  # discovers the 5 agents directly, the admin console reads them via status-service.
+  note "A2A mesh panels"
+  count_of() { curl -fs "$1" | python3 -c "import sys,json;print(json.load(sys.stdin)$2)" 2>/dev/null; }
+  pc=$(count_of "$L:$PORTAL/portal/agents" "['count']")
+  ac=$(count_of "$L:$ADMIN/admin/agents" "['roster']['count']")
+  [ "$pc" = "5" ] && ok "developer-portal /portal/agents → 5 agents" || die "portal agents count=$pc (expected 5)"
+  [ "$ac" = "5" ] && ok "admin-console /admin/agents → 5 agents (via status-service)" || die "admin agents count=$ac (expected 5)"
+  ok "SMOKE=1 — all healthy + mesh panels live; exiting."
+  exit 0
+fi
 wait
