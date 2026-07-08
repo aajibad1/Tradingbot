@@ -52,6 +52,10 @@ def discover_agents(names=None, *, client_factory=None) -> dict:
     """Fetch the agent-card of every roster agent (or a given subset) and return
     ``{name: AgentCard}`` for those that answer.
 
+    Cards are fetched **concurrently** so total latency is bounded by the slowest
+    single peer, not the sum — a per-agent 2s timeout stays ~2s overall even when
+    several agents are down, instead of degrading linearly with the outage count.
+
     Discovery is best-effort: an agent that is down, slow, or returns a malformed
     card is omitted rather than raising — the same fail-soft stance the rest of the
     platform takes toward a missing peer. A typo, however, fails loud: an unknown
@@ -60,16 +64,26 @@ def discover_agents(names=None, *, client_factory=None) -> dict:
     ``client_factory`` (name -> A2AClient) is an injection point for tests, letting
     them point discovery at in-process apps without a live server; defaults to
     ``client_for``."""
+    import concurrent.futures as _cf
+
     factory = client_factory or client_for
     roster = sorted(A2A_AGENTS) if names is None else list(names)
+    if not roster:
+        return {}
+
+    def _fetch(name):
+        return name, factory(name).fetch_card()
+
     cards: dict = {}
-    for name in roster:
-        try:
-            cards[name] = factory(name).fetch_card()
-        except KeyError:
-            raise  # unknown agent — a programming typo, not a transient outage
-        except Exception:
-            continue  # unreachable / malformed card — best-effort, skip it
+    with _cf.ThreadPoolExecutor(max_workers=len(roster)) as pool:
+        for future in _cf.as_completed(pool.submit(_fetch, n) for n in roster):
+            try:
+                name, card = future.result()
+            except KeyError:
+                raise  # unknown agent — a programming typo, not a transient outage
+            except Exception:
+                continue  # unreachable / malformed card — best-effort, skip it
+            cards[name] = card
     return cards
 
 

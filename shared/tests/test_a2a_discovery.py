@@ -184,6 +184,27 @@ def test_find_agents_with_skill_routes_by_capability():
     assert find_agents_with_skill("nope", names=names, client_factory=factory) == []
 
 
+def test_discover_agents_fetches_concurrently():
+    # A barrier that only releases once ALL fetches are in flight — if discovery ran
+    # sequentially the first fetch would block forever (the others never start), the
+    # barrier would break, and those cards would drop. All present ⇒ truly parallel.
+    import threading
+
+    names = ["a", "b", "c", "d"]
+    barrier = threading.Barrier(len(names), timeout=3)
+
+    def factory(name):
+        class _C:
+            def fetch_card(self):
+                barrier.wait()  # returns only when every worker has arrived
+                return AgentCard(name=name, description="d", url=f"http://{name}/a2a",
+                                 version="1.0", skills=[])
+        return _C()
+
+    cards = discover_agents(names=names, client_factory=factory)
+    assert set(cards) == set(names)  # sequential fetch would time out → fewer cards
+
+
 def test_roster_catalog_projects_cards_and_flags_unreachable():
     names = ["debate-service", "agent-evals"]
     factory = _roster_factory({"debate-service": ["verify-claim"], "agent-evals": []},
