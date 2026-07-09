@@ -109,5 +109,20 @@ the Idempotency-Key store + `Status` taxonomy on their order endpoints). New
 API-plane services should `install_contract` on startup. The per-endpoint OpenAPI
 definitions below remain to be expanded.
 
+## A2A discovery + mesh catalog (internal)
+Agent↔agent calls use the A2A contract (`shared/a2a`; see docs/10). Peers resolve
+by name — `A2A_<NAME>_URL` env override (NAME = upper-snake agent name, e.g.
+`A2A_DEBATE_SERVICE_URL`), else the local default port in `shared/a2a/registry.py`.
+Roster-wide discovery (`discover_agents` / `find_agents_with_skill` / `roster_catalog`)
+fetches every agent's `GET /.well-known/agent-card.json` **concurrently**, best-effort
+(a down agent is omitted; an unknown name fails loud), time-bounded ~2s total.
+
+The one `roster_catalog` projection — `{agents:[{name,description,version,url,skills}],
+count, roster, unreachable}` — is exposed read-only as a browsable mesh view:
+- `GET /v1/a2a/catalog` — agent-registry (raw catalog)
+- `GET /a2a/roster` — status-service (adds `status`: ok/degraded; always 200, advisory)
+- `GET /portal/agents` — developer-portal (partner view; adds `status`)
+- `GET /admin/agents` — admin-console (ops view; proxies status-service, `reachable` flag)
+
 ## Contract requirements
 Claude should expand this into full OpenAPI-ready endpoint definitions with request/response examples, error cases, and webhook examples.
