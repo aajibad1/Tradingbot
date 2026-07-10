@@ -8,12 +8,19 @@ licensing (docs/REGULATORY_BRIEF.md).
 Endpoints:
   GET  /healthz
   POST /score   — score one corridor quote
+
+Config (env):
+  CORRIDOR_INTEL_URL — opt-in: when set and the caller omits venue_reliability,
+  fetch it from corridor-intelligence-service /assess (fail-soft; an explicit
+  caller value always wins).
 """
 
 from __future__ import annotations
 
 import logging
+import os
 
+import httpx
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
@@ -68,8 +75,37 @@ def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _intel_reliability(corridor: str) -> tuple[float, str] | None:
+    """Fetch (reliability_score, source) from corridor-intelligence-service — the
+    enrichment its intelligence.py exists to provide. Opt-in (CORRIDOR_INTEL_URL)
+    and fail-soft: any error returns None and scoring proceeds with the quote as
+    given — intel is advisory and must never block or fail a score."""
+    base = os.environ.get("CORRIDOR_INTEL_URL")
+    if not base:
+        return None
+    try:
+        r = httpx.post(f"{base.rstrip('/')}/assess", json={"corridor": corridor}, timeout=5.0)
+        data = r.json()
+        rel = max(0.0, min(1.0, float(data["reliability_score"])))
+    except Exception:  # noqa: BLE001 — advisory enrichment must never break /score
+        logger.warning("corridor intel unavailable for %s; scoring without it", corridor)
+        return None
+    return rel, str(data.get("source", "intel"))
+
+
 def _score_one(q: QuoteIn) -> ScoreOut:
-    result = score_corridor(CorridorQuote(**q.model_dump()))
+    quote = CorridorQuote(**q.model_dump())
+    intel_note = None
+    # Only fill reliability the caller did NOT supply — an explicit value (even an
+    # explicit 1.0) always wins over intel; intel replaces the optimistic default.
+    if "venue_reliability" not in q.model_fields_set:
+        intel = _intel_reliability(q.corridor)
+        if intel is not None:
+            quote.venue_reliability, source = intel
+            intel_note = {"venue_reliability": quote.venue_reliability, "source": source}
+    result = score_corridor(quote)
+    if intel_note:
+        result.breakdown["intel"] = intel_note  # provenance in the alert payload
     out = ScoreOut(**result.__dict__)
     if result.viable:
         # Alert-only: publish for a human to settle (notification-dispatcher) —
