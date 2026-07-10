@@ -56,3 +56,85 @@ def test_signals_sorted_by_confidence_and_have_expiry():
     confs = [s.confidence for s in sigs]
     assert confs == sorted(confs, reverse=True)
     assert all(s.expiry_ms > 0 for s in sigs)
+
+
+# --- regime auto-classification (opt-in via REGIME_CLASSIFIER_URL, fail-soft) ---
+
+def _client(monkeypatch, post=None):
+    import main
+    from fastapi.testclient import TestClient
+    if post is not None:
+        monkeypatch.setattr(main.httpx, "post", post)
+    return TestClient(main.app)
+
+
+def _trending_features(**over):
+    # momentum + lag → momentum signal; divergence_z=2.5 → reversion signal too
+    base = dict(symbol="BTC/USD:PERP", momentum_bps=80.0, venue_lag_bps=20.0,
+                realized_vol_bps=5.0, divergence_z=2.5, quote_staleness_ms=100.0,
+                trend_strength=0.9)
+    base.update(over)
+    return base
+
+
+class _Resp:
+    def __init__(self, data):
+        self._data = data
+
+    def json(self):
+        return self._data
+
+
+def test_omitted_regime_is_classified_and_gates(monkeypatch):
+    # Classifier says "trending" → the reversion family must be suppressed.
+    monkeypatch.setenv("REGIME_CLASSIFIER_URL", "http://regime")
+    sent = {}
+
+    def post(url, json=None, timeout=None):
+        sent.update(json)
+        return _Resp({"regime": "trending", "confidence": 0.9})
+
+    client = _client(monkeypatch, post)
+    out = client.post("/detect", json=_trending_features()).json()
+    families = [s["family"] for s in out["signals"]]
+    assert "momentum_dislocation" in families
+    assert "stat_arb_reversion" not in families      # gated by the classified regime
+    assert out["regime"] == "trending"               # classified regime echoed back
+    assert sent["mean_reversion_z"] == 2.5           # divergence_z mapped across
+    assert sent["trend_strength"] == 0.9
+
+
+def test_explicit_regime_skips_classifier(monkeypatch):
+    monkeypatch.setenv("REGIME_CLASSIFIER_URL", "http://regime")
+
+    def _boom(*a, **k):
+        raise AssertionError("classifier must not be called when regime is explicit")
+
+    client = _client(monkeypatch, _boom)
+    out = client.post("/detect", json=_trending_features(regime="mean_reverting")).json()
+    families = [s["family"] for s in out["signals"]]
+    assert "momentum_dislocation" not in families    # explicit regime gates instead
+    assert "stat_arb_reversion" in families
+
+
+def test_classifier_unreachable_detects_ungated(monkeypatch):
+    monkeypatch.setenv("REGIME_CLASSIFIER_URL", "http://regime")
+
+    def _down(*a, **k):
+        raise RuntimeError("connection refused")
+
+    client = _client(monkeypatch, _down)
+    out = client.post("/detect", json=_trending_features()).json()
+    families = [s["family"] for s in out["signals"]]
+    # fail-soft: both families present, exactly as with no classifier configured
+    assert "momentum_dislocation" in families and "stat_arb_reversion" in families
+
+
+def test_no_classifier_env_means_no_call(monkeypatch):
+    monkeypatch.delenv("REGIME_CLASSIFIER_URL", raising=False)
+
+    def _boom(*a, **k):
+        raise AssertionError("must not call classifier when env is unset")
+
+    client = _client(monkeypatch, _boom)
+    assert client.post("/detect", json=_trending_features()).status_code == 200
