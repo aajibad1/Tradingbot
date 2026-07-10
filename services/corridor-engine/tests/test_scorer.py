@@ -106,6 +106,59 @@ def test_nonviable_corridor_does_not_publish(monkeypatch):
     assert pub.published == []
 
 
+# --- intel enrichment (corridor-intelligence-service, opt-in + fail-soft) ------
+
+class _IntelResp:
+    def __init__(self, data):
+        self._data = data
+
+    def json(self):
+        return self._data
+
+
+def test_intel_fills_omitted_reliability_and_can_demote(monkeypatch):
+    # Caller omits venue_reliability (would default to an optimistic 1.0); intel
+    # says the rail is flaky (0.4) → confidence below floor → NOT viable.
+    import main
+    monkeypatch.setenv("CORRIDOR_INTEL_URL", "http://intel")
+    monkeypatch.setattr(main.httpx, "post", lambda url, json=None, timeout=None:
+                        _IntelResp({"reliability_score": 0.4, "source": "perplexity"}))
+    client, pub = _client(monkeypatch)
+    r = client.post("/score", json=_quote_json()).json()
+    assert r["settlement_confidence"] == 0.4
+    assert r["viable"] is False           # the 1.0 default would have alerted
+    assert r["breakdown"]["intel"] == {"venue_reliability": 0.4, "source": "perplexity"}
+    assert pub.published == []
+
+
+def test_explicit_reliability_wins_over_intel(monkeypatch):
+    # An explicit caller value — even 1.0 — means intel is never consulted.
+    import main
+    monkeypatch.setenv("CORRIDOR_INTEL_URL", "http://intel")
+
+    def _boom(*a, **k):
+        raise AssertionError("intel must not be consulted when reliability is explicit")
+
+    monkeypatch.setattr(main.httpx, "post", _boom)
+    client, _ = _client(monkeypatch)
+    r = client.post("/score", json=_quote_json(venue_reliability=1.0)).json()
+    assert r["viable"] is True and "intel" not in r["breakdown"]
+
+
+def test_intel_unreachable_is_fail_soft(monkeypatch):
+    import main
+    monkeypatch.setenv("CORRIDOR_INTEL_URL", "http://intel")
+
+    def _down(*a, **k):
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(main.httpx, "post", _down)
+    client, _ = _client(monkeypatch)
+    r = client.post("/score", json=_quote_json()).json()
+    assert r["viable"] is True            # scored with the quote as given
+    assert "intel" not in r["breakdown"]  # no provenance claimed
+
+
 def test_scan_ranks_viable_and_skips_nonviable(monkeypatch):
     client, pub = _client(monkeypatch)
     quotes = [
