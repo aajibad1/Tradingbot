@@ -115,7 +115,10 @@ onramp,wallet}; auth→scope→meter→proxy), and
 promotion across approval-gate/agent-registry/agent-evals), and
 `./scripts/a2a_smoke.sh` (Agent2Agent contract: boots all 5 A2A agents — card
 discovery + message/send; ai-ops NEVER-tier stays hidden/refused; registry
-consults agent-evals over A2A). All use only indexed bash arrays (macOS bash 3.2).
+consults agent-evals over A2A), and
+`./scripts/signal_plane_smoke.sh` (hybrid signal plane: features → regime-gated
+detection → arb-signals journal → threshold-gated DIRECTIONAL publish with
+execute=False; classifier-down fail-soft). All use only indexed bash arrays (macOS bash 3.2).
 Frontend: `cd apps/frontend && npm install && npm run dev` (needs core-api on :8080).
 
 ## Running tests
