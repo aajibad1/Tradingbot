@@ -93,3 +93,81 @@ def test_none_report_is_noop():
     from router import apply_calibration
     cands = [_c("a")]
     assert apply_calibration(cands, None) is cands
+
+
+# --- ledger calibration fetch (opt-in via TRADE_LEDGER_URL, fail-soft) ---------
+
+def _client(monkeypatch, get=None):
+    import main
+    from fastapi.testclient import TestClient
+    if get is not None:
+        monkeypatch.setattr(main.httpx, "get", get)
+    return TestClient(main.app)
+
+
+def _candidates():
+    return [{"venue": "kraken", "size_usd": 10_000, "expected_depth_usd": 500_000,
+             "taker_fee_bps": 10, "est_slippage_bps": 2, "latency_ms": 50},
+            {"venue": "coinbase", "size_usd": 10_000, "expected_depth_usd": 500_000,
+             "taker_fee_bps": 10, "est_slippage_bps": 2, "latency_ms": 50}]
+
+
+class _Resp:
+    def __init__(self, data, status=200):
+        self._data, self.status_code = data, status
+
+    def json(self):
+        return self._data
+
+
+def test_omitted_route_quality_fetched_from_ledger(monkeypatch):
+    # kraken fills 30bps worse than modeled → after calibration coinbase must win.
+    monkeypatch.setenv("TRADE_LEDGER_URL", "http://ledger")
+    seen = {}
+
+    def get(url, params=None, timeout=None):
+        seen["url"], seen["params"] = url, params
+        return _Resp({"venues": {"kraken": {"slippage_gap_bps": 30.0, "n_fills": 40}}})
+
+    client = _client(monkeypatch, get)
+    out = client.post("/rank", json={"candidates": _candidates()}).json()
+    assert seen["url"] == "http://ledger/ml-export/route-quality"
+    assert out["calibrated"] is True
+    assert out["recommended_route"] == "coinbase"     # kraken down-ranked by realized gap
+
+
+def test_explicit_route_quality_skips_fetch(monkeypatch):
+    monkeypatch.setenv("TRADE_LEDGER_URL", "http://ledger")
+
+    def _boom(*a, **k):
+        raise AssertionError("ledger must not be fetched when route_quality is explicit")
+
+    client = _client(monkeypatch, _boom)
+    out = client.post("/rank", json={
+        "candidates": _candidates(),
+        "route_quality": {"venues": {"coinbase": {"slippage_gap_bps": 30.0, "n_fills": 40}}},
+    }).json()
+    assert out["calibrated"] is True
+    assert out["recommended_route"] == "kraken"       # explicit payload applied
+
+
+def test_ledger_unreachable_ranks_uncalibrated(monkeypatch):
+    monkeypatch.setenv("TRADE_LEDGER_URL", "http://ledger")
+
+    def _down(*a, **k):
+        raise RuntimeError("connection refused")
+
+    client = _client(monkeypatch, _down)
+    out = client.post("/rank", json={"candidates": _candidates()}).json()
+    assert out["calibrated"] is False and out["recommended_route"] is not None
+
+
+def test_no_env_means_no_fetch(monkeypatch):
+    monkeypatch.delenv("TRADE_LEDGER_URL", raising=False)
+
+    def _boom(*a, **k):
+        raise AssertionError("must not fetch when env is unset")
+
+    client = _client(monkeypatch, _boom)
+    out = client.post("/rank", json={"candidates": _candidates()}).json()
+    assert out["calibrated"] is False
