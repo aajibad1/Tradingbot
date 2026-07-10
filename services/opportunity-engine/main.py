@@ -29,7 +29,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
 
+from directional import opportunity_from_signal
 from models import EngineStatus, MarketSnapshot
 from scorer import score
 from shared.models.exchange_tick import ExchangeTick
@@ -173,6 +175,48 @@ def healthz() -> dict[str, str]:
 def status() -> EngineStatus:
     with _status_lock:
         return _status.model_copy()
+
+
+class SignalIn(BaseModel):
+    """A movement signal in signal-engine's output schema (hybrid plane)."""
+    symbol: str
+    direction: str
+    gross_edge_bps: float
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    expiry_ms: int = Field(default=0, ge=0)
+    venue: str = "hyperliquid"
+    size_usd: float = Field(default=10_000.0, gt=0.0)
+
+
+@app.post("/signal")
+def ingest_signal(sig: SignalIn) -> dict:
+    """Ingest a signal-engine movement signal: convert it to a DIRECTIONAL
+    Opportunity (directional.py) and publish it into the normal risk-gated flow.
+
+    Same publish threshold as the neutral strategies, and the risk-engine remains
+    the only gate — the directional sleeve budget is 0 by default, so published
+    directional opportunities are REFUSED until an operator opens the sleeve.
+    Fail loud on a bad direction or unknown venue (422), never a silent default."""
+    try:
+        opp = opportunity_from_signal(
+            sig.model_dump(exclude={"venue", "size_usd"}),
+            venue=sig.venue, size_usd=sig.size_usd,
+        )
+    except (ValueError, KeyError) as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    threshold = _resolve_publish_threshold()
+    published = opp.net_edge_bps >= threshold
+    if published:
+        get_publisher().publish(
+            Topic.OPPORTUNITIES, opp,
+            attributes={"strategy": opp.strategy.value, "asset": opp.asset},
+        )
+        with _status_lock:
+            _status.last_publish_at = datetime.utcnow()
+            _status.opportunities_published_total += 1
+    return {"opportunity_id": opp.id, "net_edge_bps": round(opp.net_edge_bps, 2),
+            "threshold_bps": threshold, "published": published}
 
 
 @app.post("/evaluate-now", response_model=EngineStatus)
