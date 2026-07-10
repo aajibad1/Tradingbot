@@ -9,6 +9,7 @@
 #   invariants  : ai-ops NEVER-tier tools are neither advertised nor invocable;
 #                 approval-gate withdrawals stay hard-blocked
 #   consumer    : agent-registry consults agent-evals OVER A2A before activation
+#                 (both wired-by-env and found-by-capability-discovery)
 #
 # No GCP/Redis (in-memory sandbox). Requirements: python3 + each service's deps, curl.
 # Usage: ./scripts/a2a_smoke.sh        NOTE: indexed arrays only (macOS bash 3.2).
@@ -20,6 +21,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEBATE=${DEBATE:-8340} GATE=${GATE:-8341} REG=${REG:-8342} EVALS=${EVALS:-8343} OPS=${OPS:-8344}
 CORRIDOR=${CORRIDOR:-8345}   # an A2A *consumer* (not an agent): consults debate
 STATUS=${STATUS:-8347}       # status-service: surfaces the live roster at /a2a/roster
+REG2=${REG2:-8348}           # second registry with NO evals env: proves the
+                             # capability-discovery fallback (eval-verdict) live
 LOG_DIR="$(mktemp -d)"
 PIDS=()
 FAILS=0
@@ -84,6 +87,15 @@ start agent-registry         "$REG" \
   A2A_AGENT_REGISTRY_URL="$L:$REG" \
   A2A_AI_OPS_AGENT_URL="$L:$OPS"
 start ai-ops-agent           "$OPS"
+# Second registry with NO evals env — activation must DISCOVER the eval authority
+# by capability (eval-verdict). Discovery hits evals at its registry.py default
+# (8343), so this instance only boots when EVALS is unoverridden.
+if [[ "$EVALS" == 8343 ]]; then
+  start agent-registry "$REG2" \
+    A2A_DEBATE_SERVICE_URL="$L:$DEBATE" \
+    A2A_APPROVAL_GATE_SERVICE_URL="$L:$GATE" \
+    A2A_AI_OPS_AGENT_URL="$L:$OPS"
+fi
 # corridor-intelligence is an A2A consumer: point it at debate-service so /assess
 # adversarially-verifies the reliability claim over A2A.
 start corridor-intelligence-service "$CORRIDOR" A2A_DEBATE_SERVICE_URL="$L:$DEBATE"
@@ -100,6 +112,7 @@ wait_healthy approval-gate-service "$GATE"
 wait_healthy agent-evals "$EVALS"
 wait_healthy agent-registry "$REG"
 wait_healthy ai-ops-agent "$OPS"
+[[ "$EVALS" == 8343 ]] && wait_healthy agent-registry "$REG2"
 wait_healthy corridor-intelligence-service "$CORRIDOR"
 wait_healthy status-service "$STATUS"
 
@@ -180,6 +193,21 @@ curl -s "$L:$EVALS/v1/evals/run" -H 'content-type: application/json' \
 A=$(curl -s "$L:$REG/v1/agents/ranker/activate" -H 'content-type: application/json' -d '{"version":"v1"}' | python3 -c "import sys,json;print(json.load(sys.stdin).get('active',''))")
 [[ "$A" == v1 ]] && ok "passing eval (via A2A) → activated v1" || bad "expected active=v1, got $A"
 
+# ── 5b) registry with NO evals env: eval authority found by DISCOVERY ────────
+if [[ "$EVALS" == 8343 ]]; then
+  note "5b) agent-registry (no evals env) → discovers eval-verdict provider"
+  curl -s "$L:$REG2/v1/agents" -H 'content-type: application/json' -d '{"name":"scout","provider":"claude"}' >/dev/null
+  curl -s "$L:$REG2/v1/agents/scout/prompts" -H 'content-type: application/json' -d '{"version":"v1","content":"Scout it."}' >/dev/null
+  C=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$L:$REG2/v1/agents/scout/activate" -H 'content-type: application/json' -d '{"version":"v1"}')
+  [[ "$C" == 409 ]] && ok "un-evaluated → 409 (evals peer found via discovery, gate held)" || bad "expected 409, got $C"
+  curl -s "$L:$EVALS/v1/evals/run" -H 'content-type: application/json' \
+    -d '{"agent":"scout","prompt_version":"v1","metrics":{"accuracy":0.95,"hallucination_rate":0.01,"latency_ms":700}}' >/dev/null
+  A=$(curl -s "$L:$REG2/v1/agents/scout/activate" -H 'content-type: application/json' -d '{"version":"v1"}' | python3 -c "import sys,json;print(json.load(sys.stdin).get('active',''))")
+  [[ "$A" == v1 ]] && ok "passing eval (peer via discovery) → activated v1" || bad "expected active=v1, got $A"
+else
+  note "5b) skipped (EVALS port overridden — discovery fallback needs the 8343 default)"
+fi
+
 # ── 6) registry resolve-active-version skill over A2A ────────────────────────
 note "6) agent-registry: resolve-active-version over A2A"
 AV=$(send_data "$REG" '{"agent":"ranker"}' | rpc_dkey active)
@@ -195,7 +223,7 @@ esac
 
 note "Verdict"
 if [[ "$FAILS" -eq 0 ]]; then
-  ok "A2A holds: discovery + message/send across 5 agents; invariants + 2 consumer paths (registry→evals, corridor→debate)."
+  ok "A2A holds: discovery + message/send across 5 agents; invariants + consumer paths (registry→evals by env AND by discovery, corridor→debate)."
   exit 0
 else
   bad "$FAILS assertion(s) failed — see logs in $LOG_DIR."; exit 1
