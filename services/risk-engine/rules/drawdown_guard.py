@@ -1,5 +1,7 @@
 """Daily-loss drawdown guard. Trips the kill switch when breached."""
 
+import os
+
 from shared.models.risk_state import RiskRule, RiskState, RiskViolation
 from shared.utils.fee_calculator import MIN_VIABLE_NET_EDGE_BPS
 
@@ -11,8 +13,12 @@ DEFAULT_LIMITS: dict[str, float] = {
     "max_single_asset_exposure_pct": 20.0,
     "max_leverage_multiplier": 1.0,
     # Hybrid directional sleeve budget (% of capital). 0.0 = pure market-neutral
-    # (directional opportunities are rejected). Raise to enable the satellite.
-    "max_directional_exposure_pct": 0.0,
+    # (directional opportunities are rejected). Operator knob: the
+    # MAX_DIRECTIONAL_EXPOSURE_PCT env raises it to enable the satellite sleeve.
+    # Read once at import — changing it requires a config DEPLOY, deliberately:
+    # risk-limit changes are an operator action, never a runtime/UI bypass
+    # (docs/RISK_POLICY.md; the AI permission model may only PROPOSE them).
+    "max_directional_exposure_pct": float(os.environ.get("MAX_DIRECTIONAL_EXPOSURE_PCT", "0.0")),
     # Anchored to the same constant the opportunity-engine uses; never let
     # these two drift. ``min_viable_net_edge_bps()`` in shared/utils picks up
     # Redis-backed dynamic overrides; here we keep the static floor.

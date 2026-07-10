@@ -74,3 +74,18 @@ def test_neutral_trade_does_not_touch_directional_exposure(fake_redis):
     t.directional = False
     position_tracker.apply_trade(fake_redis, t, "default")
     assert load_state(fake_redis, "default").directional_exposure_pct == 0.0
+
+
+def test_sleeve_env_knob_is_a_deploy_time_setting(monkeypatch):
+    """MAX_DIRECTIONAL_EXPOSURE_PCT raises the sleeve at import (config deploy);
+    absent the env the sleeve stays 0.0 — pure neutral, directional refused."""
+    import importlib
+
+    import rules.drawdown_guard as dg
+
+    monkeypatch.setenv("MAX_DIRECTIONAL_EXPOSURE_PCT", "5.0")
+    importlib.reload(dg)
+    assert dg.DEFAULT_LIMITS["max_directional_exposure_pct"] == 5.0
+    monkeypatch.delenv("MAX_DIRECTIONAL_EXPOSURE_PCT")
+    importlib.reload(dg)  # restore the module-level default for other tests
+    assert dg.DEFAULT_LIMITS["max_directional_exposure_pct"] == 0.0

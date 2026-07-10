@@ -26,6 +26,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RISK_PORT="${RISK_PORT:-8082}"
+RISK2_PORT="${RISK2_PORT:-8092}"   # sleeve-enabled twin for the directional-budget check
 PAPER_PORT="${PAPER_PORT:-8081}"
 REDIS_URL="${REDIS_URL:-redis://localhost:6379/0}"
 CAPITAL_USD="${CAPITAL_USD:-100000}"
@@ -97,8 +98,13 @@ wait_healthy() {
 
 note "Starting services"
 start_service risk-engine  "$RISK_PORT"  KILL_SWITCH_RESET_TOKEN="$RESET_TOKEN"
+# Twin engine with the satellite sleeve OPENED via the deploy-time operator knob —
+# proves the same directional opportunity flips refused → approved on config only.
+start_service risk-engine  "$RISK2_PORT" KILL_SWITCH_RESET_TOKEN="$RESET_TOKEN" \
+  MAX_DIRECTIONAL_EXPOSURE_PCT="5.0"
 start_service paper-trader "$PAPER_PORT"
 wait_healthy risk-engine  "$RISK_PORT"
+wait_healthy risk-engine  "$RISK2_PORT"
 wait_healthy paper-trader "$PAPER_PORT"
 
 # ── opportunity payload (delta-neutral funding-rate carry) ───────────────────
@@ -131,6 +137,48 @@ jq_or_cat() { python3 -m json.tool 2>/dev/null || cat; }
 note "1) risk-engine /evaluate  (size=\$${SIZE_USD}, net_edge=62bps)"
 curl -s "localhost:$RISK_PORT/evaluate" -H 'Content-Type: application/json' \
   -d "{\"opportunity\": $(opp false)}" | jq_or_cat
+
+# ── 1b. directional sleeve: refused by default, approved once opened ─────────
+dopp() {
+  cat <<JSON
+{
+  "id": "local-directional-1",
+  "strategy": "directional",
+  "asset": "BTC",
+  "long_exchange": "hyperliquid",
+  "short_exchange": "hyperliquid",
+  "gross_spread_bps": 75.0,
+  "trading_fees_bps": 10.0,
+  "slippage_estimate_bps": 4.0,
+  "funding_rate_annualized_pct": 0.0,
+  "net_edge_bps": 58.0,
+  "confidence_score": 0.9,
+  "recommended_size_usd": 1500.0,
+  "min_hold_hours": 1.0,
+  "detected_at": "2026-06-01T12:00:00Z",
+  "execute": false,
+  "direction": "long"
+}
+JSON
+}
+
+note "1b) directional sleeve gate: default 0% refuses; MAX_DIRECTIONAL_EXPOSURE_PCT=5 approves"
+D1=$(curl -s "localhost:$RISK_PORT/evaluate" -H 'Content-Type: application/json' -d "{\"opportunity\": $(dopp)}")
+echo "$D1" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+rules = [v['rule'] for v in d['violations']]
+assert d['approved'] is False and 'directional_budget' in rules, d
+print('  refused by default sleeve (0%):', rules)
+" || die "directional opportunity was NOT refused at the default 0% sleeve"
+ok "sleeve closed → directional refused (rule=directional_budget)"
+D2=$(curl -s "localhost:$RISK2_PORT/evaluate" -H 'Content-Type: application/json' -d "{\"opportunity\": $(dopp)}")
+echo "$D2" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert d['approved'] is True and d['violations'] == [], d
+" || die "directional opportunity was NOT approved with the sleeve open (5%)"
+ok "sleeve open (5% via env, config deploy) → same opportunity approved"
 
 # ── 2. paper-trader simulates the approved opportunity ───────────────────────
 note "2) paper-trader /simulate  (execute=true)"

@@ -18,6 +18,7 @@ in this document or in code that disagrees is a bug.
 | `max_per_trade_capital_pct` | 2.0% | Bounds the worst-case loss on any one position to ~2% of capital before considering hedge slippage. |
 | `max_exchange_exposure_pct` | 25.0% | Limits concentration on any single venue so that a single exchange outage / freeze / insolvency cannot wipe out more than a quarter of capital. |
 | `max_single_asset_exposure_pct` | 20.0% | Limits idiosyncratic asset risk (de-pegs, hard forks, listing halts). |
+| `max_directional_exposure_pct` | 0.0% | Hybrid satellite sleeve: net directional (non-neutral) exposure budget. 0.0 = pure market-neutral — DIRECTIONAL opportunities are refused. Opened only via the `MAX_DIRECTIONAL_EXPOSURE_PCT` env at deploy time (a config-deploy operator action; the AI permission model may only PROPOSE the change, per Section 5). |
 | `max_leverage_multiplier` | 1.0x | Paper-trader and the initial live phase run unlevered. Raising this is a policy decision that requires Slack approval (see Section 5). |
 | `min_net_edge_bps` | 8.0 bps | Below this, the spread does not reliably clear fees + slippage + safety buffer. Matches `shared/utils/fee_calculator.MIN_VIABLE_NET_EDGE_BPS`. |
 | `max_api_latency_ms` | 500 ms | A leg whose API is sluggish cannot be hedged in time. Sourced from `health:latency:<exchange>` written by `market-data`. |
