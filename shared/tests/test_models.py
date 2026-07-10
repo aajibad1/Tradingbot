@@ -166,3 +166,20 @@ def test_enum_value_stability() -> None:
     assert TradeType.LIVE.value == "live"
     assert TradeStatus.OPEN.value == "open"
     assert RiskRule.KILL_SWITCH.value == "kill_switch"
+
+
+def test_movement_signal_journal_fact():
+    from datetime import datetime
+    import pytest
+    from pydantic import ValidationError
+    from shared.models.movement_signal import MovementSignal
+
+    sig = MovementSignal(signal_id="s1", symbol="BTC/USD:PERP",
+                         family="momentum_dislocation", direction="long",
+                         gross_edge_bps=65.0, confidence=0.9, expiry_ms=2000,
+                         detected_at=datetime(2026, 1, 1))
+    assert sig.regime is None  # ungated detection is a valid fact
+    with pytest.raises(ValidationError):
+        MovementSignal(signal_id="s2", symbol="X", family="f", direction="long",
+                       gross_edge_bps=1.0, confidence=1.5, expiry_ms=0,  # confidence > 1
+                       detected_at=datetime(2026, 1, 1))
