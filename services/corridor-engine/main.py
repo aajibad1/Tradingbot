@@ -13,6 +13,10 @@ Config (env):
   CORRIDOR_INTEL_URL — opt-in: when set and the caller omits venue_reliability,
   fetch it from corridor-intelligence-service /assess (fail-soft; an explicit
   caller value always wins).
+  FX_RATE_SERVICE_URL — when set and the caller omits official_fx_dest_per_source,
+  compute the benchmark from fx-rate-service official rates. Unlike intel, the
+  benchmark is LOAD-BEARING (gross edge is measured against it), so a missing
+  benchmark fails loud (422/503) rather than scoring nonsense.
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ import logging
 import os
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from scorer import CorridorQuote, score_corridor
@@ -48,7 +52,9 @@ class QuoteIn(BaseModel):
     amount_source: float = Field(gt=0.0)
     stablecoin_per_source: float = Field(gt=0.0)
     dest_per_stablecoin: float = Field(gt=0.0)
-    official_fx_dest_per_source: float = Field(gt=0.0)
+    # Omit (or 0) to have it computed from fx-rate-service official rates
+    # (requires FX_RATE_SERVICE_URL) — the benchmark the edge is measured against.
+    official_fx_dest_per_source: float = Field(default=0.0, ge=0.0)
     buy_fee_bps: float = 0.0
     sell_fee_bps: float = 0.0
     conversion_cost_bps: float = 0.0
@@ -93,8 +99,48 @@ def _intel_reliability(corridor: str) -> tuple[float, str] | None:
     return rel, str(data.get("source", "intel"))
 
 
+def _fx_benchmark(corridor: str) -> tuple[float, str]:
+    """Compute official_fx_dest_per_source from fx-rate-service official rates
+    (units-per-USD on both legs → dest/source cross rate). LOAD-BEARING: gross
+    edge is measured against this benchmark, so failure is loud — 422 when no
+    source is configured, 503 when the FX service can't answer — never a silent
+    zero that scores every corridor as edgeless."""
+    base = os.environ.get("FX_RATE_SERVICE_URL")
+    if not base:
+        raise HTTPException(
+            status_code=422,
+            detail="no FX benchmark: supply official_fx_dest_per_source "
+                   "or set FX_RATE_SERVICE_URL")
+    try:
+        src, dst = corridor.split("->", 1)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"corridor {corridor!r} is not 'SRC->DST'")
+    try:
+        legs = {}
+        for ccy in (src.strip().upper(), dst.strip().upper()):
+            r = httpx.get(f"{base.rstrip('/')}/rate",
+                          params={"currency": ccy, "ngn_rate_type": "official"}, timeout=5.0)
+            r.raise_for_status()
+            legs[ccy] = float(r.json()["rate"])  # units of ccy per 1 USD
+        benchmark = legs[dst.strip().upper()] / legs[src.strip().upper()]
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001 — surfaced, not swallowed: benchmark is load-bearing
+        raise HTTPException(status_code=503, detail=f"fx benchmark unavailable: {e}")
+    if benchmark <= 0:
+        raise HTTPException(status_code=503, detail="fx benchmark unavailable: zero rate")
+    return benchmark, "fx-rate-service:official"
+
+
 def _score_one(q: QuoteIn) -> ScoreOut:
     quote = CorridorQuote(**q.model_dump())
+    fx_note = None
+    # The benchmark is required for a meaningful score: explicit value wins,
+    # else compute it from official FX rates — and fail loud when we can't.
+    if quote.official_fx_dest_per_source <= 0:
+        quote.official_fx_dest_per_source, fx_source = _fx_benchmark(q.corridor)
+        fx_note = {"official_fx_dest_per_source": quote.official_fx_dest_per_source,
+                   "source": fx_source}
     intel_note = None
     # Only fill reliability the caller did NOT supply — an explicit value (even an
     # explicit 1.0) always wins over intel; intel replaces the optimistic default.
@@ -106,6 +152,8 @@ def _score_one(q: QuoteIn) -> ScoreOut:
     result = score_corridor(quote)
     if intel_note:
         result.breakdown["intel"] = intel_note  # provenance in the alert payload
+    if fx_note:
+        result.breakdown["fx_benchmark"] = fx_note  # benchmark provenance
     out = ScoreOut(**result.__dict__)
     if result.viable:
         # Alert-only: publish for a human to settle (notification-dispatcher) —

@@ -175,3 +175,68 @@ def test_scan_ranks_viable_and_skips_nonviable(monkeypatch):
     assert edges == sorted(edges, reverse=True)
     # only the viable ones were alerted
     assert len(pub.published) == len(r["viable"])
+
+
+# --- FX benchmark fill (fx-rate-service; load-bearing → fail loud) --------------
+
+def test_omitted_benchmark_computed_from_fx_rates(monkeypatch):
+    # NGN 1600/USD, ZAR 18/USD → ZAR per NGN = 0.01125; crypto route gives ~2% more.
+    import main
+    monkeypatch.setenv("FX_RATE_SERVICE_URL", "http://fx")
+
+    class _R(_IntelResp):
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(main.httpx, "get",
+                        lambda url, params=None, timeout=None:
+                        _R({"rate": {"NGN": 1600.0, "ZAR": 18.0}[params["currency"]]}))
+    client, _ = _client(monkeypatch)
+    q = _quote_json()
+    q.pop("official_fx_dest_per_source", None)
+    q["stablecoin_per_source"] = 0.000625        # USDT per NGN
+    q["dest_per_stablecoin"] = 18.36             # ZAR per USDT → ~2% over 0.01125
+    r = client.post("/score", json=q)
+    body = r.json()
+    assert r.status_code == 200
+    assert body["breakdown"]["fx_benchmark"]["official_fx_dest_per_source"] == 0.01125
+    assert body["breakdown"]["fx_benchmark"]["source"] == "fx-rate-service:official"
+    assert body["gross_edge_bps"] > 150          # edge measured against the fetched benchmark
+
+
+def test_omitted_benchmark_without_fx_env_is_422(monkeypatch):
+    monkeypatch.delenv("FX_RATE_SERVICE_URL", raising=False)
+    client, pub = _client(monkeypatch)
+    q = _quote_json()
+    q.pop("official_fx_dest_per_source", None)
+    r = client.post("/score", json=q)
+    assert r.status_code == 422 and "FX benchmark" in r.json()["detail"]
+    assert pub.published == []                    # nothing nonsensical alerted
+
+
+def test_fx_service_down_is_503_not_silent_zero(monkeypatch):
+    import main
+    monkeypatch.setenv("FX_RATE_SERVICE_URL", "http://fx")
+
+    def _down(*a, **k):
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(main.httpx, "get", _down)
+    client, pub = _client(monkeypatch)
+    q = _quote_json()
+    q.pop("official_fx_dest_per_source", None)
+    r = client.post("/score", json=q)
+    assert r.status_code == 503 and pub.published == []
+
+
+def test_explicit_benchmark_skips_fx_fetch(monkeypatch):
+    import main
+    monkeypatch.setenv("FX_RATE_SERVICE_URL", "http://fx")
+
+    def _boom(*a, **k):
+        raise AssertionError("fx must not be fetched when the benchmark is explicit")
+
+    monkeypatch.setattr(main.httpx, "get", _boom)
+    client, _ = _client(monkeypatch)
+    r = client.post("/score", json=_quote_json())   # carries the explicit benchmark
+    assert r.status_code == 200 and "fx_benchmark" not in r.json()["breakdown"]
