@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 from shared.models.exchange_tick import ExchangeTick
 from shared.models.funding_rate import FundingRate
+from shared.models.movement_signal import MovementSignal
 from shared.models.opportunity import Opportunity
 from shared.models.risk_decision import RiskDecision
 from shared.models.trade import Trade
@@ -209,6 +210,21 @@ def risk_decision_to_row(decision: RiskDecision) -> dict:
     }
 
 
+def signal_to_row(sig: MovementSignal) -> dict:
+    """ML fact: one emitted movement signal (the learning layer's substrate)."""
+    return {
+        "signal_id": sig.signal_id,
+        "symbol": sig.symbol,
+        "family": sig.family,
+        "direction": sig.direction,
+        "gross_edge_bps": sig.gross_edge_bps,
+        "confidence": sig.confidence,
+        "expiry_ms": sig.expiry_ms,
+        "regime": sig.regime,
+        "detected_at": sig.detected_at.isoformat(),
+    }
+
+
 def tick_to_row(tick: ExchangeTick) -> dict:
     return {
         "exchange": tick.exchange,
@@ -257,3 +273,8 @@ def write_risk_decision(decision: RiskDecision) -> None:
     # One decision per opportunity — decision_id is its natural dedup key.
     _stream(_table("arb_ml", "risk_decisions"),
             risk_decision_to_row(decision), row_id=decision.decision_id)
+
+
+def write_signal(sig: MovementSignal) -> None:
+    # One row per detection — signal_id is its natural dedup key.
+    _stream(_table("arb_ml", "signals"), signal_to_row(sig), row_id=sig.signal_id)

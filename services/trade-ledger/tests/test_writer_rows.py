@@ -1,8 +1,9 @@
 from datetime import datetime
 
-from writer import audit_log_to_row, funding_to_row, opportunity_to_row, risk_alert_to_row, trade_to_row
+from writer import audit_log_to_row, funding_to_row, opportunity_to_row, risk_alert_to_row, signal_to_row, trade_to_row
 
 from shared.models.funding_rate import FundingRate
+from shared.models.movement_signal import MovementSignal
 from shared.models.opportunity import Opportunity, StrategyType
 from shared.models.trade import Trade, TradeLeg, TradeStatus, TradeType
 
@@ -156,3 +157,14 @@ def test_write_is_local_sink_without_project(monkeypatch, caplog) -> None:
     with caplog.at_level(logging.INFO):
         writer.write_trade(trade)   # must not raise
     assert any("local-sink" in r.message for r in caplog.records)
+
+
+def test_signal_to_row_serializes_detection_fact() -> None:
+    row = signal_to_row(MovementSignal(
+        signal_id="s1", symbol="BTC/USD:PERP", family="orderbook_imbalance",
+        direction="short", gross_edge_bps=9.6, confidence=0.8, expiry_ms=800,
+        regime=None, detected_at=datetime(2026, 1, 1, 12, 30),
+    ))
+    assert row["signal_id"] == "s1" and row["family"] == "orderbook_imbalance"
+    assert row["regime"] is None                      # ungated detection journals as null
+    assert row["detected_at"] == "2026-01-01T12:30:00"

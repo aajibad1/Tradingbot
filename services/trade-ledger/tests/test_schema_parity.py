@@ -22,6 +22,7 @@ import pytest
 
 from writer import (
     audit_log_to_row,
+    signal_to_row,
     funding_to_row,
     opportunity_to_row,
     risk_alert_to_row,
@@ -33,6 +34,7 @@ from writer import (
 from shared.models.exchange_tick import ExchangeTick
 from shared.models.funding_rate import FundingRate
 from shared.models.opportunity import Opportunity, StrategyType
+from shared.models.movement_signal import MovementSignal
 from shared.models.risk_decision import RiskDecision
 from shared.models.trade import Trade, TradeLeg, TradeStatus, TradeType
 
@@ -166,6 +168,14 @@ def _tick_row() -> dict:
     ))
 
 
+def _signal_row() -> dict:
+    return signal_to_row(MovementSignal(
+        signal_id="s1", symbol="BTC/USD:PERP", family="momentum_dislocation",
+        direction="long", gross_edge_bps=65.0, confidence=0.9, expiry_ms=2000,
+        regime="trending", detected_at=datetime(2026, 1, 1),
+    ))
+
+
 _CASES = {
     "trades.sql": _trade_row,
     "opportunities.sql": _opportunity_row,
@@ -174,6 +184,7 @@ _CASES = {
     "risk_decisions.sql": _risk_decision_row,
     "audit_log.sql": _audit_row,
     "ticks.sql": _tick_row,
+    "signals.sql": _signal_row,
 }
 
 

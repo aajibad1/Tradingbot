@@ -43,6 +43,12 @@ class Topic(str, Enum):
     # the gate. No service gates on this topic; it is data-capture only.
     RISK_DECISIONS = "arb-risk-decisions"
     TRADE_FILLS = "arb-trade-fills"
+    # Every movement signal the signal-engine emits (shared/models/movement_signal.py),
+    # journaled so the learning layer (signal-replay-service) can label signal
+    # quality against realized outcomes. trade-ledger streams these to
+    # ``arb_ml.signals``. Data-capture only — no service gates on this topic, and
+    # publishing is FAIL-OPEN: a publish failure never blocks detection.
+    SIGNALS = "arb-signals"
     AI_PROPOSALS = "arb-ai-proposals"
     AUDIT_LOG = "arb-audit-log"
     # Emitted by ``services/sentiment-service`` on every 4h refresh. The

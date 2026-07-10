@@ -138,3 +138,43 @@ def test_no_classifier_env_means_no_call(monkeypatch):
 
     client = _client(monkeypatch, _boom)
     assert client.post("/detect", json=_trending_features()).status_code == 200
+
+
+# --- signal journal (Topic.SIGNALS; fail-open) ----------------------------------
+
+def test_emitted_signals_are_journaled_with_ids(monkeypatch):
+    import main
+    from shared.pubsub.publisher import Topic
+    monkeypatch.delenv("REGIME_CLASSIFIER_URL", raising=False)
+    published = []
+
+    class _Pub:
+        def publish(self, topic, payload, attributes=None):
+            published.append((topic, payload, attributes))
+            return "id"
+
+    monkeypatch.setattr(main, "get_publisher", lambda: _Pub())
+    client = _client(monkeypatch)
+    out = client.post("/detect", json=_trending_features()).json()
+    assert len(out["signals"]) == 2 and len(published) == 2
+    # every emitted signal carries the id its journal fact was published with
+    journaled = {p.signal_id for _, p, _ in published}
+    assert {s["signal_id"] for s in out["signals"]} == journaled
+    topic, fact, attrs = published[0]
+    assert topic == Topic.SIGNALS
+    assert attrs == {"family": fact.family, "symbol": "BTC/USD:PERP"}
+    assert fact.direction in ("long", "short") and fact.detected_at is not None
+
+
+def test_journal_failure_never_blocks_detection(monkeypatch):
+    import main
+    monkeypatch.delenv("REGIME_CLASSIFIER_URL", raising=False)
+
+    class _Broken:
+        def publish(self, *a, **k):
+            raise RuntimeError("pubsub down")
+
+    monkeypatch.setattr(main, "get_publisher", lambda: _Broken())
+    client = _client(monkeypatch)
+    out = client.post("/detect", json=_trending_features())
+    assert out.status_code == 200 and len(out.json()["signals"]) == 2  # fail-open
