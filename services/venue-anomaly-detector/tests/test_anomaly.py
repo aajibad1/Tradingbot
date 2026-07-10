@@ -35,3 +35,65 @@ def test_update_drop_and_rejection():
 def test_critical_dominates_warn():
     r = detect(VenueSignals("kraken", spread_bps=30, expected_spread_bps=5, sequence_gap_rate=0.2))
     assert r.status is Severity.CRITICAL
+
+
+# --- connector-runtime health sink (opt-in + fail-soft) ------------------------
+
+def _client(monkeypatch, post):
+    import main
+    from fastapi.testclient import TestClient
+    monkeypatch.setattr(main.httpx, "post", post)
+    return TestClient(main.app)
+
+
+def test_degraded_verdict_pushed_to_connector_runtime(monkeypatch):
+    monkeypatch.setenv("CONNECTOR_RUNTIME_URL", "http://connectors")
+    calls = []
+
+    def post(url, json=None, timeout=None):
+        calls.append((url, json))
+        class R: status_code = 200
+        return R()
+
+    client = _client(monkeypatch, post)
+    r = client.post("/detect", json={"venue": "kraken", "quote_staleness_ms": 9000})
+    assert r.json()["degraded"] is True
+    url, body = calls[0]
+    assert url == "http://connectors/v1/connectors/kraken/health"
+    assert body["healthy"] is False and "stale_quotes" in body["detail"]
+
+
+def test_healthy_verdict_clears_health(monkeypatch):
+    monkeypatch.setenv("CONNECTOR_RUNTIME_URL", "http://connectors")
+    calls = []
+
+    def post(url, json=None, timeout=None):
+        calls.append(json)
+        class R: status_code = 200
+        return R()
+
+    client = _client(monkeypatch, post)
+    client.post("/detect", json={"venue": "kraken", "quote_staleness_ms": 100,
+                                 "spread_bps": 5, "expected_spread_bps": 5})
+    assert calls[0] == {"healthy": True, "detail": "ok"}  # keeps the catalog current
+
+
+def test_no_push_when_env_unset(monkeypatch):
+    monkeypatch.delenv("CONNECTOR_RUNTIME_URL", raising=False)
+
+    def post(*a, **k):
+        raise AssertionError("must not call connector-runtime when env is unset")
+
+    client = _client(monkeypatch, post)
+    assert client.post("/detect", json={"venue": "kraken"}).status_code == 200
+
+
+def test_unreachable_runtime_is_fail_soft(monkeypatch):
+    monkeypatch.setenv("CONNECTOR_RUNTIME_URL", "http://connectors")
+
+    def post(*a, **k):
+        raise RuntimeError("connection refused")
+
+    client = _client(monkeypatch, post)
+    r = client.post("/detect", json={"venue": "kraken", "quote_staleness_ms": 9000})
+    assert r.status_code == 200 and r.json()["degraded"] is True  # /detect unaffected
