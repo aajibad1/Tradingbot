@@ -52,7 +52,8 @@ def test_degraded_verdict_pushed_to_connector_runtime(monkeypatch):
 
     def post(url, json=None, timeout=None):
         calls.append((url, json))
-        class R: status_code = 200
+        class R:
+            status_code = 200
         return R()
 
     client = _client(monkeypatch, post)
@@ -69,7 +70,8 @@ def test_healthy_verdict_clears_health(monkeypatch):
 
     def post(url, json=None, timeout=None):
         calls.append(json)
-        class R: status_code = 200
+        class R:
+            status_code = 200
         return R()
 
     client = _client(monkeypatch, post)
