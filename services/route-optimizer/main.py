@@ -60,10 +60,12 @@ def _fetch_route_quality() -> dict | None:
         if r.status_code != 200:
             return None
         report = r.json()
+        # Shape-check INSIDE the fail-soft boundary: a 200 with a non-dict body
+        # (misconfigured URL) must degrade to uncalibrated, never 500 /rank.
+        return report if isinstance(report, dict) and report.get("venues") else None
     except Exception:  # noqa: BLE001 — advisory calibration must never break /rank
         logger.warning("trade-ledger route-quality unavailable; ranking uncalibrated")
         return None
-    return report if report.get("venues") else None
 
 
 @app.get("/healthz")
@@ -74,11 +76,16 @@ def healthz() -> dict[str, str]:
 @app.post("/rank")
 def rank(req: RankRequest) -> dict:
     # An explicit calibration payload always wins; otherwise fetch it (opt-in).
-    route_quality = req.route_quality or _fetch_route_quality()
+    # `is not None`, not truthiness: an explicit {} means "rank uncalibrated"
+    # and must NOT fall through to the ledger fetch.
+    route_quality = (req.route_quality if req.route_quality is not None
+                     else _fetch_route_quality())
     ranking = rank_routes(
         [RouteCandidate(**c.model_dump()) for c in req.candidates],
         route_quality=route_quality,
     )
     out = asdict(ranking)
-    out["calibrated"] = route_quality is not None  # provenance for the caller
+    # True only when a non-empty calibration was actually applied — an explicit
+    # {} payload ranks uncalibrated and must not claim otherwise.
+    out["calibrated"] = bool(route_quality)
     return out
