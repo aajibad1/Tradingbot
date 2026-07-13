@@ -80,6 +80,9 @@ jobs:
           context: .
           file: services/${{ matrix.service }}/Dockerfile
           push: true
+          # No provenance attestation: buildx would wrap the image in an OCI
+          # index that Cloud Run rejects (same fix as scripts/deploy.sh).
+          provenance: false
           tags: |
             ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ matrix.service }}:${{ steps.tag.outputs.tag }}
             ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ matrix.service }}:latest
@@ -104,6 +107,7 @@ jobs:
           context: .
           file: apps/frontend/Dockerfile
           push: true
+          provenance: false  # Cloud Run rejects the OCI attestation index
           tags: |
             ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/frontend:${{ github.event.inputs.image_tag || github.sha }}
             ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/frontend:latest
