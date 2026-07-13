@@ -171,3 +171,24 @@ def test_no_env_means_no_fetch(monkeypatch):
     client = _client(monkeypatch, _boom)
     out = client.post("/rank", json={"candidates": _candidates()}).json()
     assert out["calibrated"] is False
+
+
+def test_explicit_empty_payload_means_uncalibrated_not_fetch(monkeypatch):
+    # {} is an explicit "rank uncalibrated" — it must NOT fall through to the fetch.
+    monkeypatch.setenv("TRADE_LEDGER_URL", "http://ledger")
+
+    def _boom(*a, **k):
+        raise AssertionError("ledger must not be fetched for an explicit empty payload")
+
+    client = _client(monkeypatch, _boom)
+    out = client.post("/rank", json={"candidates": _candidates(), "route_quality": {}}).json()
+    assert out["calibrated"] is False  # nothing applied — and the fetch was skipped
+
+
+def test_malformed_200_body_is_fail_soft(monkeypatch):
+    # A misconfigured URL returning 200 with a non-dict body must degrade to
+    # uncalibrated, never 500 /rank.
+    monkeypatch.setenv("TRADE_LEDGER_URL", "http://ledger")
+    client = _client(monkeypatch, lambda url, params=None, timeout=None: _Resp(["not", "a", "dict"]))
+    r = client.post("/rank", json={"candidates": _candidates()})
+    assert r.status_code == 200 and r.json()["calibrated"] is False
