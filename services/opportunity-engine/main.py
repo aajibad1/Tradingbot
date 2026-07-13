@@ -184,6 +184,11 @@ class SignalIn(BaseModel):
     gross_edge_bps: float
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     expiry_ms: int = Field(default=0, ge=0)
+    # The journal key from signal-engine's /detect response. When present it
+    # becomes the Opportunity id, so arb_ml.signals joins deterministically to
+    # arb_ml.risk_decisions.opportunity_id and on to realized trades — the whole
+    # point of journaling. Omitted → a fresh uuid, exactly as before.
+    signal_id: str | None = None
     venue: str = "hyperliquid"
     size_usd: float = Field(default=10_000.0, gt=0.0)
 
@@ -199,11 +204,15 @@ def ingest_signal(sig: SignalIn) -> dict:
     Fail loud on a bad direction or unknown venue (422), never a silent default."""
     try:
         opp = opportunity_from_signal(
-            sig.model_dump(exclude={"venue", "size_usd"}),
+            sig.model_dump(exclude={"venue", "size_usd", "signal_id"}),
             venue=sig.venue, size_usd=sig.size_usd,
         )
-    except (ValueError, KeyError) as e:
+    except KeyError as e:
+        raise HTTPException(status_code=422, detail=f"unknown venue: {e}")
+    except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    if sig.signal_id:
+        opp.id = sig.signal_id  # detection → decision → realized-outcome join key
 
     threshold = _resolve_publish_threshold()
     published = opp.net_edge_bps >= threshold

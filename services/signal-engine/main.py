@@ -77,7 +77,8 @@ def _classify_regime(f: FeaturesIn) -> str | None:
             "spread_bps": f.spread_bps,
             "mean_reversion_z": f.divergence_z,
         }, timeout=3.0)
-        return str(r.json()["regime"]) or None
+        regime = r.json().get("regime")
+        return str(regime) if regime else None  # a JSON null must not become "None"
     except Exception:  # noqa: BLE001 — advisory gating must never break /detect
         logger.warning("regime-classifier unavailable; detecting ungated for %s", f.symbol)
         return None
