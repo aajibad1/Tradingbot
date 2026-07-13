@@ -132,7 +132,12 @@ def _fx_benchmark(corridor: str) -> tuple[float, str]:
     return benchmark, "fx-rate-service:official"
 
 
-def _score_one(q: QuoteIn) -> ScoreOut:
+def _prepare(q: QuoteIn) -> tuple[CorridorQuote, dict | None, dict | None]:
+    """Resolve everything that can FAIL before anything can PUBLISH: the FX
+    benchmark (fail-loud 422/503) and the intel reliability fill (fail-soft).
+    /scan prepares ALL quotes first so a bad quote mid-batch can never leave
+    earlier quotes' alerts already published — a retried scan would duplicate
+    them (alert-only is not idempotent downstream)."""
     quote = CorridorQuote(**q.model_dump())
     fx_note = None
     # The benchmark is required for a meaningful score: explicit value wins,
@@ -149,6 +154,11 @@ def _score_one(q: QuoteIn) -> ScoreOut:
         if intel is not None:
             quote.venue_reliability, source = intel
             intel_note = {"venue_reliability": quote.venue_reliability, "source": source}
+    return quote, fx_note, intel_note
+
+
+def _score_prepared(prepared: tuple[CorridorQuote, dict | None, dict | None]) -> ScoreOut:
+    quote, fx_note, intel_note = prepared
     result = score_corridor(quote)
     if intel_note:
         result.breakdown["intel"] = intel_note  # provenance in the alert payload
@@ -162,6 +172,10 @@ def _score_one(q: QuoteIn) -> ScoreOut:
         logger.info("VIABLE corridor=%s net_edge=%.0fbps confidence=%.2f",
                     result.corridor, result.net_edge_bps, result.settlement_confidence)
     return out
+
+
+def _score_one(q: QuoteIn) -> ScoreOut:
+    return _score_prepared(_prepare(q))
 
 
 @app.post("/score", response_model=ScoreOut)
@@ -181,7 +195,12 @@ class ScanOut(BaseModel):
 @app.post("/scan", response_model=ScanOut)
 def scan(body: ScanIn) -> ScanOut:
     """Score many corridors at once; return the viable ones ranked by net edge.
-    The realistic path — a sweep over live corridor quotes."""
-    scored = [_score_one(q) for q in body.quotes]
+    The realistic path — a sweep over live corridor quotes.
+
+    Two phases on purpose: prepare (can 422/503) for EVERY quote first, then
+    score+publish — so a failing quote aborts the whole scan before any alert
+    goes out, keeping /scan all-or-nothing (no duplicate alerts on retry)."""
+    prepared = [_prepare(q) for q in body.quotes]
+    scored = [_score_prepared(p) for p in prepared]
     viable = sorted((s for s in scored if s.viable), key=lambda s: s.net_edge_bps, reverse=True)
     return ScanOut(scanned=len(scored), viable=viable)

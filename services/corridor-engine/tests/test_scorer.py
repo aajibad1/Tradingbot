@@ -240,3 +240,16 @@ def test_explicit_benchmark_skips_fx_fetch(monkeypatch):
     client, _ = _client(monkeypatch)
     r = client.post("/score", json=_quote_json())   # carries the explicit benchmark
     assert r.status_code == 200 and "fx_benchmark" not in r.json()["breakdown"]
+
+
+def test_scan_publishes_nothing_when_any_quote_fails_to_prepare(monkeypatch):
+    # A bad quote mid-batch must abort the WHOLE scan before any alert publishes —
+    # a retried scan would otherwise duplicate the earlier quotes' alerts.
+    monkeypatch.delenv("FX_RATE_SERVICE_URL", raising=False)
+    client, pub = _client(monkeypatch)
+    good = _quote_json()                       # viable, explicit benchmark
+    bad = _quote_json()
+    bad.pop("official_fx_dest_per_source")     # no benchmark, no FX env → 422
+    r = client.post("/scan", json={"quotes": [good, bad]})
+    assert r.status_code == 422
+    assert pub.published == []                 # the viable quote did NOT alert

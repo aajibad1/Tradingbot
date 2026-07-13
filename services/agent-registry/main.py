@@ -43,7 +43,7 @@ from shared.a2a import (
     base_url,
     client_for,
     data_part,
-    find_agents_with_skill,
+    discover_agents,
     install_a2a,
     roster_catalog,
     text_part,
@@ -151,20 +151,28 @@ def list_prompts(name: str) -> dict[str, Any]:
     return {"agent": name, "prompts": list(agent["prompts"].values()), "active": agent["active"]}
 
 
-def _resolve_evals_base() -> str | None:
+def _resolve_evals_base() -> tuple[str | None, bool]:
     """Locate the eval authority's A2A base URL. An explicit env wins (back-compat
     and deliberate pinning); otherwise discover whoever advertises the
-    ``eval-verdict`` skill on the A2A roster, so the registry routes by capability
-    rather than a hardcoded peer. Discovery is best-effort and time-bounded so a
-    dead peer can't stall an activation; returns None when neither is available
-    (sandbox/bootstrap)."""
+    ``eval-verdict`` skill on the A2A roster. Discovery is time-bounded so a dead
+    peer can't stall an activation.
+
+    Returns ``(base_url_or_none, mesh_reachable)``. The second element is how the
+    caller distinguishes a true sandbox (NOTHING on the roster answered — no mesh
+    deployed) from a running mesh whose eval authority is merely down or missing.
+    The two must not be conflated: treating an evals blip as "not configured"
+    would silently flip the eval gate OPEN during an outage."""
     explicit = os.environ.get("A2A_AGENT_EVALS_URL") or os.environ.get("AGENT_EVALS_URL")
     if explicit:
-        return explicit
-    providers = find_agents_with_skill(
-        "eval-verdict", client_factory=lambda n: client_for(n, timeout=2.0)
+        return explicit, True
+    cards = discover_agents(client_factory=lambda n: client_for(n, timeout=2.0))
+    providers = sorted(
+        name for name, card in cards.items()
+        if any(skill.id == "eval-verdict" for skill in card.skills)
     )
-    return base_url(providers[0]) if providers else None
+    if providers:
+        return base_url(providers[0]), True
+    return None, bool(cards)
 
 
 def _eval_passed(agent: str, version: str) -> tuple[bool, str]:
@@ -173,9 +181,15 @@ def _eval_passed(agent: str, version: str) -> tuple[bool, str]:
     capability discovery. When evals isn't wired at all we allow activation
     (sandbox/bootstrap). Fail-CLOSED on a reachable-but-not-passing or un-evaluated
     version. The legacy AGENT_EVALS_URL still works: A2A's endpoint lives at
-    {base}/a2a on the same agent-evals service."""
-    base = _resolve_evals_base()
+    {base}/a2a on the same agent-evals service.
+
+    Sandbox-allow applies ONLY when no mesh is deployed at all (no roster member
+    answered discovery). A reachable mesh with no discoverable eval authority
+    fails CLOSED — an agent-evals outage must never become an activation bypass."""
+    base, mesh_reachable = _resolve_evals_base()
     if not base:
+        if mesh_reachable:
+            return False, "eval authority not discoverable (fail closed)"
         return True, "evals not configured (sandbox)"
     try:
         task = A2AClient(base, timeout=5.0).send_data({"agent": agent, "version": version})

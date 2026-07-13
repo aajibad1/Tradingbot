@@ -130,18 +130,20 @@ async function loadCatalog(){
   }
   c.innerHTML=h||'no services';
 }
+function esc(s){ return String(s??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 async function loadAgents(){
   const a=document.getElementById('agents');
   const r=await jget('/portal/agents'); const d=r.data||{};
   if(!Array.isArray(d.agents)){ a.textContent='agent mesh unavailable'; return; }
-  let h='<p class="muted">status: <b>'+(d.status||'?')+'</b> · '+(d.count||0)+'/'+((d.roster||[]).length)+' answering</p>';
+  let h='<p class="muted">status: <b>'+esc(d.status||'?')+'</b> · '+(d.count||0)+'/'+((d.roster||[]).length)+' answering</p>';
   for(const ag of d.agents){
-    const skills=(ag.skills||[]).map(s=>'<code>'+s.id+'</code>').join(' ');
-    h+='<p style="margin:10px 0 2px"><b>'+ag.name+'</b> <span class="muted">v'+(ag.version||'?')+'</span></p>';
-    h+='<div class="muted">'+(ag.description||'')+'</div>';
+    // card fields come from whatever answers on the mesh — escape EVERYTHING
+    const skills=(ag.skills||[]).map(s=>'<code>'+esc(s.id)+'</code>').join(' ');
+    h+='<p style="margin:10px 0 2px"><b>'+esc(ag.name)+'</b> <span class="muted">v'+esc(ag.version||'?')+'</span></p>';
+    h+='<div class="muted">'+esc(ag.description||'')+'</div>';
     if(skills) h+='<div style="margin-top:3px">'+skills+'</div>';
   }
-  for(const down of (d.unreachable||[])){ h+='<p style="margin:8px 0 0"><b>'+down+'</b> <span class="muted">— unreachable</span></p>'; }
+  for(const down of (d.unreachable||[])){ h+='<p style="margin:8px 0 0"><b>'+esc(down)+'</b> <span class="muted">— unreachable</span></p>'; }
   a.innerHTML=h;
 }
 listKeys(); loadCatalog(); loadAgents();

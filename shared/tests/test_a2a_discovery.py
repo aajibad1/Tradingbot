@@ -167,9 +167,24 @@ def test_discover_agents_unknown_name_fails_loud():
 
 
 def test_discover_agents_defaults_to_full_roster():
-    # no names → every A2A_AGENTS member is attempted; with no real servers up they
-    # are all unreachable, so the result is empty rather than an error.
-    assert discover_agents() == {}
+    # no names → every A2A_AGENTS member is attempted (verified via an injected
+    # always-down factory — no real network, so the test can't flake against a
+    # running local stack on the default ports).
+    from shared.a2a import A2A_AGENTS
+
+    attempted = []
+
+    def factory(name):
+        attempted.append(name)
+
+        class _Down:
+            def fetch_card(self):
+                raise RuntimeError("down")
+
+        return _Down()
+
+    assert discover_agents(client_factory=factory) == {}
+    assert sorted(attempted) == sorted(A2A_AGENTS)
 
 
 def test_find_agents_with_skill_routes_by_capability():
