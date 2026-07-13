@@ -79,15 +79,17 @@ async function loadDeliveries(){
   for(const x of d){ t+='<tr><td><code>'+x.event_type+'</code></td><td>'+x.endpoint_id+'</td><td>'+x.status+'</td><td>'+(x.response_code??'')+'</td></tr>'; }
   document.getElementById('deliveries').innerHTML = d.length? t+'</table>' : '<span class="muted">no deliveries</span>';
 }
+function esc(s){ return String(s??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 async function loadAgents(){
   const r=await jget('/admin/agents'); const a=document.getElementById('agents');
   if(!r.data || r.data.reachable===false){ a.innerHTML='<span class="down">status-service unreachable</span>'; return; }
   const m=r.data.roster||{}; const agents=m.agents||[];
   let h='<p class="muted">'+badge(m.status||'?')+' · '+(m.count||0)+'/'+((m.roster||[]).length)+' answering</p>';
   h+='<table><tr><th>agent</th><th>version</th><th>skills</th></tr>';
-  for(const ag of agents){ h+='<tr><td><code>'+ag.name+'</code></td><td>'+(ag.version||'?')+'</td><td>'+
-    (ag.skills||[]).map(s=>'<code>'+s.id+'</code>').join(' ')+'</td></tr>'; }
-  for(const down of (m.unreachable||[])){ h+='<tr><td><code>'+down+'</code></td><td colspan="2"><span class="down">unreachable</span></td></tr>'; }
+  // card fields come from whatever answers on the mesh — escape EVERYTHING
+  for(const ag of agents){ h+='<tr><td><code>'+esc(ag.name)+'</code></td><td>'+esc(ag.version||'?')+'</td><td>'+
+    (ag.skills||[]).map(s=>'<code>'+esc(s.id)+'</code>').join(' ')+'</td></tr>'; }
+  for(const down of (m.unreachable||[])){ h+='<tr><td><code>'+esc(down)+'</code></td><td colspan="2"><span class="down">unreachable</span></td></tr>'; }
   a.innerHTML=h+'</table>';
 }
 function refreshAll(){ loadHealth(); loadAgents(); loadTenant(); loadDeliveries(); }

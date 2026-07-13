@@ -62,11 +62,12 @@ def discover_agents(names=None, *, client_factory=None) -> dict:
     agent name raises ``KeyError`` (via ``base_url``) instead of being swallowed.
 
     ``client_factory`` (name -> A2AClient) is an injection point for tests, letting
-    them point discovery at in-process apps without a live server; defaults to
-    ``client_for``."""
+    them point discovery at in-process apps without a live server; the default is
+    ``client_for`` with a 2s timeout, so the documented ~2s bound holds for bare
+    ``discover_agents()`` calls too (A2AClient's own default is 30s)."""
     import concurrent.futures as _cf
 
-    factory = client_factory or client_for
+    factory = client_factory or (lambda n: client_for(n, timeout=2.0))
     roster = sorted(A2A_AGENTS) if names is None else list(names)
     if not roster:
         return {}

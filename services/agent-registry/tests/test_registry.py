@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from shared.a2a import Message, Task, TaskStatus, data_part
+from shared.a2a import AgentCard, AgentSkill, Message, Task, TaskStatus, data_part
 
 import main
 
@@ -56,7 +56,16 @@ def test_prompt_versions_are_immutable(client):
     assert dup.status_code == 409 and dup.json()["error"]["code"] == "version_exists"
 
 
-def test_activation_allowed_without_evals_configured(client):
+def _evals_card():
+    return AgentCard(name="agent-evals", description="d", url="http://evals/a2a",
+                     version="1.0",
+                     skills=[AgentSkill(id="eval-verdict", name="E", description="d")])
+
+
+def test_activation_allowed_without_evals_configured(client, monkeypatch):
+    # TRUE sandbox: nothing on the roster answers discovery (no real network here —
+    # unstubbed discovery would dial live local agents and flake).
+    monkeypatch.setattr(main, "discover_agents", lambda **k: {})
     _agent(client)
     client.post("/v1/agents/ranker/prompts", json={"version": "v1", "content": "x"})
     r = client.post("/v1/agents/ranker/activate", json={"version": "v1"})
@@ -116,19 +125,27 @@ def test_activation_fail_closed_when_evals_unreachable(client, monkeypatch):
 def test_eval_peer_discovered_by_skill_when_env_unset(client, monkeypatch):
     # No explicit env (client fixture cleared both) → the registry must DISCOVER the
     # eval authority by capability and still gate on its verdict.
-    seen = {}
-
-    def _fake_discovery(skill_id, **kwargs):
-        seen["skill"] = skill_id
-        return ["agent-evals"]
-
-    monkeypatch.setattr(main, "find_agents_with_skill", _fake_discovery)
+    monkeypatch.setattr(main, "discover_agents", lambda **k: {"agent-evals": _evals_card()})
     _agent(client)
     client.post("/v1/agents/ranker/prompts", json={"version": "v1", "content": "x"})
     _stub_evals(monkeypatch, {"passed": True})
     r = client.post("/v1/agents/ranker/activate", json={"version": "v1"})
     assert r.status_code == 200 and r.json()["active"] == "v1"
-    assert seen["skill"] == "eval-verdict"  # routed by the eval-verdict capability
+
+
+def test_mesh_reachable_but_no_eval_authority_fails_closed(client, monkeypatch):
+    # The mesh IS running (debate answered) but nobody advertises eval-verdict —
+    # e.g. agent-evals is down. This must NOT fall through to sandbox-allow: an
+    # evals outage must never become an activation bypass.
+    card = AgentCard(name="debate-service", description="d", url="http://debate/a2a",
+                     version="1.0",
+                     skills=[AgentSkill(id="verify-claim", name="V", description="d")])
+    monkeypatch.setattr(main, "discover_agents", lambda **k: {"debate-service": card})
+    _agent(client)
+    client.post("/v1/agents/ranker/prompts", json={"version": "v1", "content": "x"})
+    r = client.post("/v1/agents/ranker/activate", json={"version": "v1"})
+    assert r.status_code == 409
+    assert "fail closed" in r.json()["error"]["message"]
 
 
 def test_explicit_env_skips_discovery(client, monkeypatch):
@@ -138,7 +155,7 @@ def test_explicit_env_skips_discovery(client, monkeypatch):
     def _boom(*a, **k):
         raise AssertionError("discovery must not run when env is set")
 
-    monkeypatch.setattr(main, "find_agents_with_skill", _boom)
+    monkeypatch.setattr(main, "discover_agents", _boom)
     _agent(client)
     client.post("/v1/agents/ranker/prompts", json={"version": "v1", "content": "x"})
     _stub_evals(monkeypatch, {"passed": True})
