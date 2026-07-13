@@ -69,3 +69,18 @@ def test_unknown_venue_fails_loud(monkeypatch):
     client, pub = _client(monkeypatch)
     assert client.post("/signal", json=_signal(venue="mtgox")).status_code == 422
     assert pub.published == []
+
+
+def test_signal_id_becomes_the_opportunity_id(monkeypatch):
+    # The journal key must survive ingestion — it is how arb_ml.signals joins to
+    # risk_decisions.opportunity_id and on to realized trades.
+    client, pub = _client(monkeypatch)
+    r = client.post("/signal", json=_signal(signal_id="sig-abc-123"))
+    assert r.json()["opportunity_id"] == "sig-abc-123"
+    assert pub.published[0][1].id == "sig-abc-123"
+
+
+def test_omitted_signal_id_still_mints_a_fresh_id(monkeypatch):
+    client, _ = _client(monkeypatch)
+    out = client.post("/signal", json=_signal()).json()
+    assert out["opportunity_id"] and out["opportunity_id"] != "sig-abc-123"
