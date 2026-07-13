@@ -83,9 +83,28 @@ def test_sleeve_env_knob_is_a_deploy_time_setting(monkeypatch):
 
     import rules.drawdown_guard as dg
 
-    monkeypatch.setenv("MAX_DIRECTIONAL_EXPOSURE_PCT", "5.0")
-    importlib.reload(dg)
-    assert dg.DEFAULT_LIMITS["max_directional_exposure_pct"] == 5.0
-    monkeypatch.delenv("MAX_DIRECTIONAL_EXPOSURE_PCT")
-    importlib.reload(dg)  # restore the module-level default for other tests
+    try:
+        monkeypatch.setenv("MAX_DIRECTIONAL_EXPOSURE_PCT", "5.0")
+        importlib.reload(dg)
+        assert dg.DEFAULT_LIMITS["max_directional_exposure_pct"] == 5.0
+    finally:
+        # restore the module-level default even if the assert fails — a polluted
+        # DEFAULT_LIMITS would cascade into unrelated tests via conftest reimports
+        monkeypatch.delenv("MAX_DIRECTIONAL_EXPOSURE_PCT", raising=False)
+        importlib.reload(dg)
     assert dg.DEFAULT_LIMITS["max_directional_exposure_pct"] == 0.0
+
+
+def test_sleeve_env_rejects_nonfinite_and_negative(monkeypatch):
+    """float() accepts "nan"/"inf", and a NaN limit silently DISABLES the cap
+    (projected > nan is always False) — the boot must refuse instead."""
+    import pytest
+
+    from rules.drawdown_guard import _sleeve_pct_from_env
+
+    for bad in ("nan", "inf", "-inf", "1e999", "-1", "5%", "abc"):
+        monkeypatch.setenv("MAX_DIRECTIONAL_EXPOSURE_PCT", bad)
+        with pytest.raises(ValueError, match="MAX_DIRECTIONAL_EXPOSURE_PCT"):
+            _sleeve_pct_from_env()
+    monkeypatch.setenv("MAX_DIRECTIONAL_EXPOSURE_PCT", "7.5")
+    assert _sleeve_pct_from_env() == 7.5

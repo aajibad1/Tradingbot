@@ -13,10 +13,15 @@ and means the unit tests run on a vanilla Python install.
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 from typing import Iterator
 
 import pytest
+
+# The sleeve knob is captured at import — an ambient value in the developer's
+# shell would silently change DEFAULT_LIMITS before any fixture runs.
+os.environ.pop("MAX_DIRECTIONAL_EXPOSURE_PCT", None)
 
 
 class _FakePipeline:
