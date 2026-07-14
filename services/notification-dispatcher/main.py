@@ -43,15 +43,17 @@ def _ops_recipients() -> dict[Channel, str]:
 
 
 def _on_corridor_alert(message) -> None:
-    """Turn a corridor-engine alert into an ops notification and dispatch it."""
+    """Turn a corridor-engine alert into an ops notification and dispatch it.
+
+    The WHOLE pipeline sits inside the crash guard: an exception escaping a
+    Pub/Sub callback nacks the message → immediate redelivery → the same poison
+    payload crashes again, forever. Bad alerts are logged and acked instead."""
     try:
         alert = json.loads(message.data)
+        note = corridor_notification(alert, _ops_recipients())
+        dispatcher_mod.dispatch(note, _build_providers())
     except Exception:
-        logger.exception("failed to parse corridor alert")
-        message.ack()
-        return
-    note = corridor_notification(alert, _ops_recipients())
-    dispatcher_mod.dispatch(note, _build_providers())
+        logger.exception("failed to process corridor alert; acking to avoid a nack-loop")
     message.ack()
 
 
