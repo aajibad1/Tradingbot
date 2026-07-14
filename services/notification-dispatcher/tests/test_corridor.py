@@ -72,3 +72,36 @@ def test_bad_payload_is_acked_not_crashing(monkeypatch):
     msg = _Msg()
     main._on_corridor_alert(msg)
     assert msg.acked
+
+
+def test_evidence_block_renders_receipts():
+    note = corridor_notification({
+        "corridor": "NGN->ZAR", "net_edge_bps": 160.0, "settlement_confidence": 0.7,
+        "breakdown": {
+            "intel": {"venue_reliability": 0.7, "source": "perplexity",
+                      "sources": ["https://a", "https://b", "https://c"],
+                      "model_version": "sonar-pro"},
+            "debate": {"decision": "support", "confidence": 0.8,
+                       "refuted_by": 0, "n_skeptics": 3},
+            "fx_benchmark": {"official_fx_dest_per_source": 0.01125,
+                             "source": "fx-rate-service:official"},
+        },
+    })
+    assert "Evidence: reliability 0.70 (perplexity, 3 sources)" in note.message
+    assert "debate: support 0.80, 0/3 skeptics refuted" in note.message
+    assert "FX benchmark: fx-rate-service:official" in note.message
+
+
+def test_alert_without_breakdown_renders_exactly_as_before():
+    note = corridor_notification(
+        {"corridor": "NGN->ZAR", "net_edge_bps": 180.0, "settlement_confidence": 0.82})
+    assert "Evidence" not in note.message and "\n" not in note.message
+
+
+def test_partial_evidence_renders_only_present_parts():
+    note = corridor_notification({
+        "corridor": "KES->ZAR", "net_edge_bps": 120.0, "settlement_confidence": 0.6,
+        "breakdown": {"intel": {"venue_reliability": 0.6, "source": "baseline"}},
+    })
+    assert "Evidence: reliability 0.60 (baseline)" in note.message
+    assert "debate" not in note.message and "FX benchmark" not in note.message

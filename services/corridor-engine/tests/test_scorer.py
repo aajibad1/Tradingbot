@@ -253,3 +253,37 @@ def test_scan_publishes_nothing_when_any_quote_fails_to_prepare(monkeypatch):
     r = client.post("/scan", json={"quotes": [good, bad]})
     assert r.status_code == 422
     assert pub.published == []                 # the viable quote did NOT alert
+
+
+def test_intel_evidence_carries_citations_and_debate(monkeypatch):
+    # The alert a human settles on must lead with receipts: citations, the
+    # producing model, and the adversarial verdict all survive into breakdown.
+    import main
+    monkeypatch.setenv("CORRIDOR_INTEL_URL", "http://intel")
+    monkeypatch.setattr(main.httpx, "post", lambda url, json=None, timeout=None: _IntelResp({
+        "reliability_score": 0.7, "source": "perplexity",
+        "sources": ["https://a.example", "https://b.example", "https://c.example", "https://d.example"],
+        "model_version": "sonar-pro",
+        "debate": {"decision": "support", "confidence": 0.8, "refuted_by": 0,
+                   "n_skeptics": 3, "extra_key": "dropped"},
+    }))
+    client, _ = _client(monkeypatch)
+    out = client.post("/score", json=_quote_json()).json()
+    intel = out["breakdown"]["intel"]
+    assert intel["venue_reliability"] == 0.7 and intel["source"] == "perplexity"
+    assert intel["sources"] == ["https://a.example", "https://b.example", "https://c.example"]  # capped at 3
+    assert intel["model_version"] == "sonar-pro"
+    assert out["breakdown"]["debate"] == {"decision": "support", "confidence": 0.8,
+                                          "refuted_by": 0, "n_skeptics": 3}
+
+
+def test_intel_without_evidence_stays_minimal(monkeypatch):
+    # Baseline intel (no citations, no model, no debate) must not add noisy keys.
+    import main
+    monkeypatch.setenv("CORRIDOR_INTEL_URL", "http://intel")
+    monkeypatch.setattr(main.httpx, "post", lambda url, json=None, timeout=None: _IntelResp(
+        {"reliability_score": 0.7, "source": "baseline", "sources": [], "model_version": None}))
+    client, _ = _client(monkeypatch)
+    out = client.post("/score", json=_quote_json()).json()
+    assert out["breakdown"]["intel"] == {"venue_reliability": 0.7, "source": "baseline"}
+    assert "debate" not in out["breakdown"]

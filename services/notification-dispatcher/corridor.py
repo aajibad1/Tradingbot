@@ -18,6 +18,31 @@ def _source_country(corridor: str) -> str:
     return _CCY_COUNTRY.get(src.upper(), "")
 
 
+def _evidence_line(breakdown: dict) -> str:
+    """Render the alert's receipts — the operator decides whether to move money,
+    so the WHY (intel reliability + citations, adversarial debate verdict, FX
+    benchmark provenance) leads alongside the number. Every part is optional;
+    an alert with no evidence renders exactly as before."""
+    parts: list[str] = []
+    intel = breakdown.get("intel") or {}
+    if intel:
+        src = intel.get("source", "intel")
+        n_sources = len(intel.get("sources") or [])
+        cite = f", {n_sources} source{'s' if n_sources != 1 else ''}" if n_sources else ""
+        parts.append(f"reliability {float(intel.get('venue_reliability', 0.0)):.2f} ({src}{cite})")
+    debate = breakdown.get("debate") or {}
+    if debate.get("decision"):
+        conf = debate.get("confidence")
+        conf_s = f" {float(conf):.2f}" if conf is not None else ""
+        refuted, skeptics = debate.get("refuted_by"), debate.get("n_skeptics")
+        panel = f", {refuted}/{skeptics} skeptics refuted" if skeptics else ""
+        parts.append(f"debate: {debate['decision']}{conf_s}{panel}")
+    fx = breakdown.get("fx_benchmark") or {}
+    if fx.get("source"):
+        parts.append(f"FX benchmark: {fx['source']}")
+    return " · ".join(parts)
+
+
 def corridor_notification(alert: dict, recipients: dict[Channel, str] | None = None) -> Notification:
     corridor = str(alert.get("corridor", "?"))
     net = float(alert.get("net_edge_bps", 0.0))
@@ -26,6 +51,9 @@ def corridor_notification(alert: dict, recipients: dict[Channel, str] | None = N
         f"Corridor {corridor}: +{net:.0f} bps net, settlement confidence "
         f"{conf:.0%} — review and settle (alert-only)."
     )
+    evidence = _evidence_line(alert.get("breakdown") or {})
+    if evidence:
+        msg += f"\nEvidence: {evidence}"
     return Notification(
         user_id="ops",
         country=_source_country(corridor),
