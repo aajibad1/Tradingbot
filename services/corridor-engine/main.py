@@ -81,11 +81,14 @@ def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
-def _intel_reliability(corridor: str) -> tuple[float, str] | None:
-    """Fetch (reliability_score, source) from corridor-intelligence-service — the
-    enrichment its intelligence.py exists to provide. Opt-in (CORRIDOR_INTEL_URL)
-    and fail-soft: any error returns None and scoring proceeds with the quote as
-    given — intel is advisory and must never block or fail a score."""
+def _intel_evidence(corridor: str) -> tuple[float, dict, dict | None] | None:
+    """Fetch the corridor's intel from corridor-intelligence-service and keep the
+    EVIDENCE, not just the score: (reliability, intel_note, debate_note). The
+    /assess response already carries citations (sources), the producing
+    model_version, and — when debate verification is wired — an adversarial
+    verdict; an alert a human settles on should lead with those receipts, so we
+    stop dropping them here. Opt-in (CORRIDOR_INTEL_URL) and fail-soft: any error
+    returns None and scoring proceeds — intel must never block or fail a score."""
     base = os.environ.get("CORRIDOR_INTEL_URL")
     if not base:
         return None
@@ -96,7 +99,17 @@ def _intel_reliability(corridor: str) -> tuple[float, str] | None:
     except Exception:  # noqa: BLE001 — advisory enrichment must never break /score
         logger.warning("corridor intel unavailable for %s; scoring without it", corridor)
         return None
-    return rel, str(data.get("source", "intel"))
+    intel_note = {"venue_reliability": rel, "source": str(data.get("source", "intel"))}
+    if data.get("sources"):
+        intel_note["sources"] = list(data["sources"])[:3]  # top citations, capped
+    if data.get("model_version"):
+        intel_note["model_version"] = data["model_version"]
+    debate = data.get("debate")
+    debate_note = None
+    if isinstance(debate, dict) and debate.get("decision"):
+        debate_note = {k: debate.get(k) for k in
+                       ("decision", "confidence", "refuted_by", "n_skeptics")}
+    return rel, intel_note, debate_note
 
 
 def _fx_benchmark(corridor: str) -> tuple[float, str]:
@@ -132,7 +145,7 @@ def _fx_benchmark(corridor: str) -> tuple[float, str]:
     return benchmark, "fx-rate-service:official"
 
 
-def _prepare(q: QuoteIn) -> tuple[CorridorQuote, dict | None, dict | None]:
+def _prepare(q: QuoteIn) -> tuple[CorridorQuote, dict | None, dict | None, dict | None]:
     """Resolve everything that can FAIL before anything can PUBLISH: the FX
     benchmark (fail-loud 422/503) and the intel reliability fill (fail-soft).
     /scan prepares ALL quotes first so a bad quote mid-batch can never leave
@@ -147,23 +160,25 @@ def _prepare(q: QuoteIn) -> tuple[CorridorQuote, dict | None, dict | None]:
         fx_note = {"official_fx_dest_per_source": quote.official_fx_dest_per_source,
                    "source": fx_source}
     intel_note = None
+    debate_note = None
     # Only fill reliability the caller did NOT supply — an explicit value (even an
     # explicit 1.0) always wins over intel; intel replaces the optimistic default.
     if "venue_reliability" not in q.model_fields_set:
-        intel = _intel_reliability(q.corridor)
+        intel = _intel_evidence(q.corridor)
         if intel is not None:
-            quote.venue_reliability, source = intel
-            intel_note = {"venue_reliability": quote.venue_reliability, "source": source}
-    return quote, fx_note, intel_note
+            quote.venue_reliability, intel_note, debate_note = intel
+    return quote, fx_note, intel_note, debate_note
 
 
-def _score_prepared(prepared: tuple[CorridorQuote, dict | None, dict | None]) -> ScoreOut:
-    quote, fx_note, intel_note = prepared
+def _score_prepared(prepared: tuple[CorridorQuote, dict | None, dict | None, dict | None]) -> ScoreOut:
+    quote, fx_note, intel_note, debate_note = prepared
     result = score_corridor(quote)
     if intel_note:
         result.breakdown["intel"] = intel_note  # provenance in the alert payload
     if fx_note:
         result.breakdown["fx_benchmark"] = fx_note  # benchmark provenance
+    if debate_note:
+        result.breakdown["debate"] = debate_note  # adversarial verification evidence
     out = ScoreOut(**result.__dict__)
     if result.viable:
         # Alert-only: publish for a human to settle (notification-dispatcher) —
