@@ -287,3 +287,30 @@ def test_intel_without_evidence_stays_minimal(monkeypatch):
     out = client.post("/score", json=_quote_json()).json()
     assert out["breakdown"]["intel"] == {"venue_reliability": 0.7, "source": "baseline"}
     assert "debate" not in out["breakdown"]
+
+
+def test_malformed_sources_field_is_dropped_not_fatal(monkeypatch):
+    # A truthy non-list "sources" is skipped by the isinstance guard: the valid
+    # reliability still enriches the score, the malformed field never appears,
+    # and /score stays 200 — advisory intel must never 500 or abort a /scan.
+    import main
+    monkeypatch.setenv("CORRIDOR_INTEL_URL", "http://intel")
+    monkeypatch.setattr(main.httpx, "post", lambda url, json=None, timeout=None: _IntelResp(
+        {"reliability_score": 0.5, "sources": True}))
+    client, _ = _client(monkeypatch)
+    r = client.post("/score", json=_quote_json())
+    assert r.status_code == 200
+    intel = r.json()["breakdown"]["intel"]
+    assert intel["venue_reliability"] == 0.5 and "sources" not in intel
+
+
+def test_string_sources_never_fabricate_a_citation_count(monkeypatch):
+    # "sources": "https://a" is iterable — without the isinstance guard it would
+    # journal ['h','t','t'] and render "3 sources" on the evidence line.
+    import main
+    monkeypatch.setenv("CORRIDOR_INTEL_URL", "http://intel")
+    monkeypatch.setattr(main.httpx, "post", lambda url, json=None, timeout=None: _IntelResp(
+        {"reliability_score": 0.7, "source": "perplexity", "sources": "https://a.example"}))
+    client, _ = _client(monkeypatch)
+    out = client.post("/score", json=_quote_json()).json()
+    assert "sources" not in out["breakdown"]["intel"]

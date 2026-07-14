@@ -96,19 +96,21 @@ def _intel_evidence(corridor: str) -> tuple[float, dict, dict | None] | None:
         r = httpx.post(f"{base.rstrip('/')}/assess", json={"corridor": corridor}, timeout=5.0)
         data = r.json()
         rel = max(0.0, min(1.0, float(data["reliability_score"])))
+        intel_note = {"venue_reliability": rel, "source": str(data.get("source", "intel"))}
+        # isinstance, not truthiness: a string "sources" would iterate into
+        # single characters and fabricate a citation count on the evidence line.
+        if isinstance(data.get("sources"), list) and data["sources"]:
+            intel_note["sources"] = data["sources"][:3]  # top citations, capped
+        if data.get("model_version"):
+            intel_note["model_version"] = data["model_version"]
+        debate = data.get("debate")
+        debate_note = None
+        if isinstance(debate, dict) and debate.get("decision"):
+            debate_note = {k: debate.get(k) for k in
+                           ("decision", "confidence", "refuted_by", "n_skeptics")}
     except Exception:  # noqa: BLE001 — advisory enrichment must never break /score
         logger.warning("corridor intel unavailable for %s; scoring without it", corridor)
         return None
-    intel_note = {"venue_reliability": rel, "source": str(data.get("source", "intel"))}
-    if data.get("sources"):
-        intel_note["sources"] = list(data["sources"])[:3]  # top citations, capped
-    if data.get("model_version"):
-        intel_note["model_version"] = data["model_version"]
-    debate = data.get("debate")
-    debate_note = None
-    if isinstance(debate, dict) and debate.get("decision"):
-        debate_note = {k: debate.get(k) for k in
-                       ("decision", "confidence", "refuted_by", "n_skeptics")}
     return rel, intel_note, debate_note
 
 

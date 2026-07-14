@@ -105,3 +105,33 @@ def test_partial_evidence_renders_only_present_parts():
     })
     assert "Evidence: reliability 0.60 (baseline)" in note.message
     assert "debate" not in note.message and "FX benchmark" not in note.message
+
+
+def test_malformed_breakdown_never_blocks_the_alert():
+    # Evidence is decoration: any garbage upstream (misbehaving debate peer,
+    # rogue publisher) must degrade to "no evidence line", never raise — an
+    # exception here would nack-loop the alerts subscription.
+    malformed = [
+        {"intel": {"venue_reliability": None}},                    # TypeError path
+        {"intel": {"venue_reliability": "high"}},                  # ValueError path
+        {"intel": "not-a-dict"},                                   # AttributeError path
+        {"debate": {"decision": "support", "confidence": "high"}}, # non-numeric conf
+        "not-a-dict-at-all",                                       # breakdown non-dict
+        ["still", "not", "a", "dict"],
+    ]
+    for bd in malformed:
+        note = corridor_notification(
+            {"corridor": "NGN->ZAR", "net_edge_bps": 160.0,
+             "settlement_confidence": 0.7, "breakdown": bd})
+        assert note.message.startswith("Corridor NGN->ZAR: +160 bps net"), bd
+
+
+def test_partial_debate_skips_skeptics_not_renders_none():
+    # refuted_by=None with n_skeptics set must not render "None/3 skeptics".
+    note = corridor_notification({
+        "corridor": "NGN->ZAR", "net_edge_bps": 160.0, "settlement_confidence": 0.7,
+        "breakdown": {"debate": {"decision": "support", "confidence": 0.8,
+                                 "refuted_by": None, "n_skeptics": 3}},
+    })
+    assert "debate: support 0.80" in note.message
+    assert "None/" not in note.message and "skeptics" not in note.message
