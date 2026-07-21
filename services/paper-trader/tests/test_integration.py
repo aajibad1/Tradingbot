@@ -77,6 +77,47 @@ def test_full_simulation_flow() -> None:
     assert trade.closed_at is not None
     assert trade.closed_at > trade.opened_at
 
+    # Market-neutral fill must not book against the directional sleeve budget.
+    assert trade.directional is False
+
+
+def test_directional_opportunity_marks_trade_directional() -> None:
+    """A DIRECTIONAL opportunity's fill must be flagged so the risk-engine's
+    directional-sleeve budget (position_tracker.apply_trade) actually tracks
+    and releases the exposure it adds — see shared/models/trade.py."""
+    from main import _simulate_internal
+
+    opp = Opportunity(
+        id="test-opp-directional",
+        strategy=StrategyType.DIRECTIONAL,
+        asset="BTC",
+        long_exchange="hyperliquid",
+        short_exchange="hyperliquid",  # single-venue perp bet (see directional.py)
+        gross_spread_bps=40.0,
+        trading_fees_bps=10.0,
+        slippage_estimate_bps=4.0,
+        net_edge_bps=26.0,
+        confidence_score=0.7,
+        recommended_size_usd=10_000.0,
+        min_hold_hours=1.0,
+        detected_at=datetime(2026, 1, 1, 12, 0),
+        execute=True,
+        direction="long",
+    )
+
+    req = SimulateRequest(
+        opportunity=opp,
+        long_reference_price=60_000.0,
+        short_reference_price=60_000.0,
+        long_book_depth_usd=500_000.0,
+        short_book_depth_usd=500_000.0,
+    )
+
+    trade = _simulate_internal(req)
+
+    assert trade is not None
+    assert trade.directional is True
+
 
 def test_rejected_opportunity_not_simulated() -> None:
     """Opportunities with execute=False should be rejected."""

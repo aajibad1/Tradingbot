@@ -3,6 +3,7 @@
 #
 #   movement-feature-builder → [regime-classifier] → signal-engine → opportunity-engine
 #                                                         └→ Topic.SIGNALS (journal)
+#                                                              └→ signal-replay-service
 #
 #   features    : synthetic momentum window → movement features
 #   regime      : /detect omits regime → auto-classified (trending) → reversion gated
@@ -11,6 +12,8 @@
 #   ingestion   : strong signal → DIRECTIONAL opportunity published (execute=False);
 #                 weak signal → refused below the publish threshold
 #   fail-soft   : regime-classifier killed → /detect still answers, ungated
+#   learning    : journaled signal + realized trade fill join on
+#                 signal_id == opportunity_id → scored true/false-positive
 #
 # No GCP/Redis (NullPublisher). Requirements: python3 + each service's deps, curl.
 # Usage: ./scripts/signal_plane_smoke.sh   NOTE: indexed arrays only (macOS bash 3.2).
@@ -18,7 +21,7 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FEATURES=${FEATURES:-8370} SIGENG=${SIGENG:-8371} OPPENG=${OPPENG:-8372} REGIME=${REGIME:-8380}
+FEATURES=${FEATURES:-8370} SIGENG=${SIGENG:-8371} OPPENG=${OPPENG:-8372} REGIME=${REGIME:-8380} REPLAY=${REPLAY:-8390}
 LOG_DIR="$(mktemp -d)"
 PIDS=()
 FAILS=0
@@ -57,11 +60,13 @@ start movement-feature-builder "$FEATURES"
 start regime-classifier        "$REGIME"
 start signal-engine            "$SIGENG" REGIME_CLASSIFIER_URL="$L:$REGIME"
 start opportunity-engine       "$OPPENG"
+start signal-replay-service    "$REPLAY"
 REGIME_PID="${PIDS[1]}"   # killed later for the fail-soft check
 wait_healthy movement-feature-builder "$FEATURES"
 wait_healthy regime-classifier "$REGIME"
 wait_healthy signal-engine "$SIGENG"
 wait_healthy opportunity-engine "$OPPENG"
+wait_healthy signal-replay-service "$REPLAY"
 
 # ── 1) features: synthetic momentum window → movement features ────────────────
 note "1) movement-feature-builder: momentum window → features"
@@ -130,9 +135,43 @@ read -r R2 N2 <<<"$DET2"
 [[ "$R2" == None && "$N2" -ge 1 ]] && ok "classifier down → ungated detection still answers ($N2 signal(s))" \
   || bad "expected ungated detection, got regime=$R2 n=$N2"
 
+# ── 6) learning layer: journaled signal + realized fill → scored outcome ─────
+note "6) signal-replay-service: signal_id == opportunity_id join scores the fill"
+SIGNAL_PAYLOAD=$(python3 - "$DSID" <<'PY'
+import json, sys
+signal_id = sys.argv[1]
+print(json.dumps({
+    "signal_id": signal_id, "symbol": "BTC/USD:PERP", "family": "momentum_dislocation",
+    "direction": "long", "gross_edge_bps": 75.0, "confidence": 0.9, "expiry_ms": 3600000,
+    "regime": "trending", "detected_at": "2026-01-01T12:00:00",
+}))
+PY
+)
+curl -s "$L:$REPLAY/ingest-signal" -H 'content-type: application/json' -d "$SIGNAL_PAYLOAD" >/dev/null
+FILL_PAYLOAD=$(python3 - "$DSID" <<'PY'
+import json, sys
+opportunity_id = sys.argv[1]
+legs = [{"exchange": "hyperliquid", "side": "buy", "asset": "BTC", "size": 1.0,
+         "fill_price": 60000.0, "fee_usd": 1.0, "slippage_usd": 1.0,
+         "filled_at": "2026-01-01T13:00:00"}] * 2
+print(json.dumps({
+    "id": "trade-smoke-1", "opportunity_id": opportunity_id, "type": "paper", "legs": legs,
+    "gross_pnl_usd": 150.0, "net_pnl_usd": 120.0, "status": "closed",
+    "opened_at": "2026-01-01T12:30:00", "closed_at": "2026-01-01T13:00:00",
+    "directional": True,
+}))
+PY
+)
+SCORED=$(curl -s "$L:$REPLAY/ingest-fill" -H 'content-type: application/json' -d "$FILL_PAYLOAD")
+LBL=$(echo "$SCORED" | python3 -c "import sys,json;print(json.load(sys.stdin).get('label'))")
+[[ "$LBL" == true_positive ]] && ok "fill joined to signal $DSID → true_positive" \
+  || bad "expected true_positive, got: $SCORED"
+REPORT_N=$(curl -s "$L:$REPLAY/report" | python3 -c "import sys,json;print(json.load(sys.stdin)['n'])")
+[[ "$REPORT_N" == "1" ]] && ok "live report reflects 1 scored signal" || bad "report n=$REPORT_N, expected 1"
+
 note "Verdict"
 if [[ "$FAILS" -eq 0 ]]; then
-  ok "Signal plane holds: features → regime-gated detection → journal → threshold-gated DIRECTIONAL publish (execute=False)."
+  ok "Signal plane holds: features → regime-gated detection → journal → threshold-gated DIRECTIONAL publish (execute=False) → replay-scored outcome."
   exit 0
 else
   bad "$FAILS assertion(s) failed — see logs in $LOG_DIR."; exit 1

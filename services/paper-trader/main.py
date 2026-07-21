@@ -27,7 +27,7 @@ from pydantic import BaseModel
 
 from ledger import append_paper_trade
 from models import SimulateRequest, SimulateResponse
-from shared.models.opportunity import Opportunity
+from shared.models.opportunity import Opportunity, StrategyType
 from simulator.execution_model import new_trade_id, simulate_execution
 from simulator.funding_simulator import funding_period_hours, simulate_funding_payment
 from simulator.spread_collapse import sample_early_exit
@@ -184,6 +184,10 @@ def simulate_trade(
         opened_at=now,
         closed_at=closed_at,
         funding_collected_usd=funding_usd,
+        # Directional opportunities book the same venue on both legs (see
+        # opportunity_from_signal) — the risk-engine's directional-sleeve budget
+        # keys off this flag, not the venue pairing, to track exposure/release.
+        directional=req.opportunity.strategy is StrategyType.DIRECTIONAL,
         notes=(
             f"early_exit={early_exit:.1f}h" if early_exit is not None
             else f"held_full_horizon={planned_hours:.1f}h"
