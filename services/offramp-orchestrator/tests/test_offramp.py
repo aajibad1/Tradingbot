@@ -25,6 +25,7 @@ def client(monkeypatch):
     monkeypatch.delenv("GCP_PROJECT_ID", raising=False)
     monkeypatch.setenv("OFFRAMP_PROVIDER", "sandbox")
     main._orders.clear()
+    main._idempotency._kv.clear()  # module-level singleton — tests must not leak keys
     pub = _CapturePublisher()
     monkeypatch.setattr(main, "get_publisher", lambda: pub)
     c = TestClient(main.app)
