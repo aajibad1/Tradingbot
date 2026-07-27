@@ -117,7 +117,7 @@ bring_up debate-service debate-service 8340
 bring_up approval-gate-service approval-gate-service 8341
 bring_up agent-evals agent-evals 8343
 bring_up agent-registry agent-registry 8342 A2A_AGENT_EVALS_URL="http://127.0.0.1:8343"
-bring_up ai-ops-agent ai-ops-agent 8344
+bring_up ai-ops-agent ai-ops-agent 8344 APPROVAL_GATE_URL="http://127.0.0.1:8341"
 
 # Status aggregator LAST — point it at the mesh it just brought up so /status and
 # /slo reflect the real local services (advisory ones only DEGRADE, never DOWN).
