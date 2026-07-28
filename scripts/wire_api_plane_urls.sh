@@ -1,12 +1,23 @@
 #!/usr/bin/env bash
-# Post-deploy wiring for the API-plane inter-service HTTP URLs.
+# Post-deploy wiring for every inter-service HTTP/A2A URL in the system.
 #
-# The API-plane services talk over direct HTTP (gateway→upstreams, portal/admin→
-# services, tenant-billing→metering, agent-registry→evals). A Cloud Run service's
-# URL is only known after it's created, so terraform can't set these env vars at
-# create time without a cycle (same reason core-api's ACCOUNTS_SERVICE_URL is wired
-# post-deploy). Run this ONCE after `terraform apply` (and after any service is
-# recreated) to patch the env vars from the live service URLs.
+# Started as API-plane-only (gateway→upstreams, portal/admin→services,
+# tenant-billing→metering, agent-registry→evals) and now also covers the
+# opt-in fail-soft enrichment calls added since (risk-engine→opportunity-ranker,
+# market-data→venue-anomaly-detector→connector-runtime, ai-ops-agent→
+# approval-gate-service, corridor-engine→corridor-intelligence-service/
+# fx-rate-service, route-optimizer→trade-ledger) plus the one A2A peer that
+# isn't safe to leave on capability-discovery alone in prod
+# (corridor-intelligence-service→debate-service). A Cloud Run service's URL is
+# only known after it's created, so terraform can't set these env vars at
+# create time without a cycle (same reason core-api's ACCOUNTS_SERVICE_URL is
+# wired post-deploy). Run this ONCE after `terraform apply` (and after any
+# service is recreated) to patch the env vars from the live service URLs.
+#
+# Every URL wired here is a soft, fail-soft enrichment on the consuming
+# service's side — an unresolved/empty URL just means that service stays
+# quiet, never a hard failure. Only the original API-plane trio
+# (partner-auth/api-metering/gateway) is a hard requirement.
 #
 # Reads URLs via `gcloud run services describe` and patches via
 # `gcloud run services update --update-env-vars` (each triggers a new revision).
@@ -55,6 +66,14 @@ BILLING="$(url_of tenant-billing)"
 GATEWAY="$(url_of public-api-gateway)"
 STATUS="$(url_of status-service)"
 EVALS="$(url_of agent-evals)"
+OPP_RANKER="$(url_of opportunity-ranker)"
+VENUE_ANOMALY="$(url_of venue-anomaly-detector)"
+CONNECTOR_RUNTIME="$(url_of connector-runtime)"
+APPROVAL_GATE="$(url_of approval-gate-service)"
+CORRIDOR_INTEL="$(url_of corridor-intelligence-service)"
+FX_RATE="$(url_of fx-rate-service)"
+TRADE_LEDGER="$(url_of trade-ledger)"
+DEBATE="$(url_of debate-service)"
 
 for pair in "partner-auth:$PARTNER_AUTH" "api-metering:$METERING" "gateway:$GATEWAY"; do
   [[ -n "${pair#*:}" ]] || die "could not resolve URL for ${pair%%:*} — is it deployed?"
@@ -75,6 +94,18 @@ update admin-console \
   "STATUS_URL=$STATUS,PARTNER_AUTH_URL=$PARTNER_AUTH,API_METERING_URL=$METERING,WEBHOOK_URL=$WEBHOOK,BILLING_URL=$BILLING"
 update tenant-billing "API_METERING_URL=$METERING"
 update agent-registry "AGENT_EVALS_URL=$EVALS"
+
+info "Wiring opt-in enrichment + A2A URLs (fail-soft on the consuming side)"
+update risk-engine "OPPORTUNITY_RANKER_URL=$OPP_RANKER"
+update market-data "VENUE_ANOMALY_URL=$VENUE_ANOMALY"
+update venue-anomaly-detector "CONNECTOR_RUNTIME_URL=$CONNECTOR_RUNTIME"
+update ai-ops-agent "APPROVAL_GATE_URL=$APPROVAL_GATE"
+update corridor-engine "CORRIDOR_INTEL_URL=$CORRIDOR_INTEL,FX_RATE_SERVICE_URL=$FX_RATE"
+update route-optimizer "TRADE_LEDGER_URL=$TRADE_LEDGER"
+# Explicit pin, not capability discovery — A2A_DISCOVER_DEBATE's find_agents_with_skill
+# would itself need every other peer's URL resolvable first; the explicit env always
+# wins anyway (see corridor-intelligence-service/main.py:_resolve_debate_base).
+update corridor-intelligence-service "A2A_DEBATE_SERVICE_URL=$DEBATE"
 
 info "Done. The API plane is wired. Reach internal UIs via:"
 echo "  gcloud run services proxy developer-portal --region $REGION --project $PROJECT"
