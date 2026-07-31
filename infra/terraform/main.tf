@@ -108,7 +108,8 @@ locals {
   # BigQuery datasets — table-expiration rules:
   #   arb_market_data → 90d (high-volume ticks)
   #   arb_trading     → no expiration (7-year IRS / Form 8949 retention)
-  #   arb_risk        → no expiration (forever; audit)
+  #   arb_risk        → no expiration (forever; risk events + kill-switch alerts)
+  #   arb_audit       → no expiration (forever; system-wide audit log)
   #   arb_ai_ops      → 365d
   datasets = {
     arb_market_data = {
@@ -120,7 +121,11 @@ locals {
       default_table_expiry_days = 0
     }
     arb_risk = {
-      description               = "Risk events + kill-switch audit log; retained indefinitely."
+      description               = "Risk events + kill-switch alerts; retained indefinitely."
+      default_table_expiry_days = 0
+    }
+    arb_audit = {
+      description               = "System-wide audit log (services/trade-ledger/schema/audit_log.sql); retained indefinitely."
       default_table_expiry_days = 0
     }
     arb_ai_ops = {

@@ -1,9 +1,12 @@
 [
-  {"name": "source", "type": "STRING", "mode": "REQUIRED", "description": "Emitting service name."},
-  {"name": "event", "type": "STRING", "mode": "REQUIRED"},
-  {"name": "actor", "type": "STRING", "mode": "NULLABLE", "description": "human or ai-agent id"},
-  {"name": "payload_json", "type": "STRING", "mode": "NULLABLE", "description": "Original event payload as a JSON string."},
-  {"name": "correlation_id", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "event_id", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "source", "type": "STRING", "mode": "REQUIRED", "description": "Emitting service, e.g. 'risk-engine' | 'ai-ops-agent' | 'execution-orchestrator'."},
+  {"name": "event_type", "type": "STRING", "mode": "REQUIRED", "description": "'limit_change' | 'kill_switch_reset' | 'trade_approved' | ..."},
+  {"name": "actor", "type": "STRING", "mode": "NULLABLE", "description": "'system' | 'claude@ai-ops' | 'admin@example.com'"},
+  {"name": "action", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "resource_type", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "resource_id", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "metadata", "type": "JSON", "mode": "NULLABLE"},
   {"name": "emitted_at", "type": "TIMESTAMP", "mode": "REQUIRED"},
   {"name": "ingested_at", "type": "TIMESTAMP", "mode": "REQUIRED", "defaultValueExpression": "CURRENT_TIMESTAMP()"}
 ]

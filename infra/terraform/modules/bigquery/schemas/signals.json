@@ -1,0 +1,12 @@
+[
+  {"name": "signal_id", "type": "STRING", "mode": "REQUIRED", "description": "Assigned at detection; the join key."},
+  {"name": "symbol", "type": "STRING", "mode": "REQUIRED", "description": "Canonical, e.g. 'BTC/USD:PERP'."},
+  {"name": "family", "type": "STRING", "mode": "REQUIRED", "description": "momentum_dislocation | orderbook_imbalance | stat_arb_reversion"},
+  {"name": "direction", "type": "STRING", "mode": "REQUIRED", "description": "long | short"},
+  {"name": "gross_edge_bps", "type": "NUMERIC", "mode": "REQUIRED", "description": "Expected edge at detection."},
+  {"name": "confidence", "type": "NUMERIC", "mode": "REQUIRED"},
+  {"name": "expiry_ms", "type": "INT64", "mode": "REQUIRED", "description": "How long the setup was expected to persist."},
+  {"name": "regime", "type": "STRING", "mode": "NULLABLE", "description": "Market regime at detection (the gating context)."},
+  {"name": "detected_at", "type": "TIMESTAMP", "mode": "REQUIRED"},
+  {"name": "ingested_at", "type": "TIMESTAMP", "mode": "NULLABLE", "defaultValueExpression": "CURRENT_TIMESTAMP()"}
+]
