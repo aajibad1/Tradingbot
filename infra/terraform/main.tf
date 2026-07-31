@@ -78,6 +78,7 @@ locals {
   subscriptions = {
     "arb-market-data-opp-engine"    = "arb-market-data"
     "arb-funding-rates-opp-engine"  = "arb-funding-rates"
+    "arb-funding-rates-ledger"      = "arb-funding-rates"
     "arb-opportunities-risk-engine" = "arb-opportunities"
     "arb-opportunities-ledger"      = "arb-opportunities"
     # Executors consume APPROVED opportunities (post risk-engine bridge), not the raw feed.
@@ -192,6 +193,7 @@ locals {
         "arb-audit-log-ledger",
         "arb-ai-proposals-ledger",
         "arb-signals-ledger",
+        "arb-funding-rates-ledger",
         # Forward tick collection → arb_market_data.ticks (gated by env below).
         "arb-market-data-ledger",
       ]
