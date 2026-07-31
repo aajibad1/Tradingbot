@@ -31,6 +31,7 @@ from writer import (
     trade_to_row,
 )
 
+from shared.models.audit_log_entry import AuditLogEntry
 from shared.models.exchange_tick import ExchangeTick
 from shared.models.funding_rate import FundingRate
 from shared.models.opportunity import Opportunity, StrategyType
@@ -141,11 +142,11 @@ def _risk_event_row() -> dict:
 
 
 def _audit_row() -> dict:
-    return audit_log_to_row({
-        "event_id": "e1", "source": "ai-ops-agent", "event_type": "proposal",
-        "actor": "claude", "action": "propose", "resource_type": "limit",
-        "resource_id": "x", "metadata": {}, "emitted_at": "2026-01-01T00:00:00Z",
-    })
+    return audit_log_to_row(AuditLogEntry(
+        event_id="e1", source="ai-ops-agent", event_type="proposal",
+        actor="claude", action="propose", resource_type="limit",
+        resource_id="x", metadata={}, emitted_at=datetime(2026, 1, 1),
+    ))
 
 
 def _risk_decision_row() -> dict:

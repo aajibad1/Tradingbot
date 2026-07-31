@@ -2,6 +2,7 @@ from datetime import datetime
 
 from writer import audit_log_to_row, funding_to_row, opportunity_to_row, risk_alert_to_row, signal_to_row, trade_to_row
 
+from shared.models.audit_log_entry import AuditLogEntry
 from shared.models.funding_rate import FundingRate
 from shared.models.movement_signal import MovementSignal
 from shared.models.opportunity import Opportunity, StrategyType
@@ -117,23 +118,34 @@ def test_risk_alert_to_row_uses_limit_value() -> None:
 
 def test_audit_log_to_row_includes_metadata() -> None:
     """Verify audit_log_to_row produces valid row dicts."""
-    payload = {
-        "event_id": "evt_123",
-        "source": "ai-ops-agent",
-        "event_type": "limit_change_proposed",
-        "actor": "claude@ai-ops",
-        "action": "propose_limit_change",
-        "resource_type": "risk_limit",
-        "resource_id": "max_position_size_usd",
-        "metadata": {"old_value": 50000, "new_value": 75000},
-        "emitted_at": "2026-01-01T14:00:00Z",
-    }
-    row = audit_log_to_row(payload)
+    entry = AuditLogEntry(
+        event_id="evt_123",
+        source="ai-ops-agent",
+        event_type="limit_change_proposed",
+        actor="claude@ai-ops",
+        action="propose_limit_change",
+        resource_type="risk_limit",
+        resource_id="max_position_size_usd",
+        metadata={"old_value": 50000, "new_value": 75000},
+        emitted_at=datetime(2026, 1, 1, 14, 0, 0),
+    )
+    row = audit_log_to_row(entry)
     assert row["event_id"] == "evt_123"
     assert row["source"] == "ai-ops-agent"
     assert row["event_type"] == "limit_change_proposed"
     assert row["actor"] == "claude@ai-ops"
     assert row["metadata"] == {"old_value": 50000, "new_value": 75000}
+
+
+def test_audit_log_entry_auto_generates_event_id() -> None:
+    """event_id must never be None on the wire — the BigQuery column is
+    REQUIRED (schema/audit_log.sql), so a caller that omits it still gets a
+    valid row instead of a silently-failing insert."""
+    entry = AuditLogEntry(source="risk-engine", event_type="kill_switch_reset",
+                           emitted_at=datetime(2026, 1, 1))
+    assert entry.event_id
+    row = audit_log_to_row(entry)
+    assert row["event_id"] == entry.event_id
 
 
 def test_write_is_local_sink_without_project(monkeypatch, caplog) -> None:

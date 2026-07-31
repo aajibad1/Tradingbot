@@ -39,9 +39,9 @@ class _CapturePublisher:
     def __init__(self):
         self.events = []
 
-    def publish_event(self, topic, event_type, payload, *, producer, tenant_id=None,
-                      correlation_id=None, version=1):
-        self.events.append((event_type, payload["id"]))
+    def publish(self, topic, payload, attributes=None):
+        # payload is an AuditLogEntry — the canonical Topic.AUDIT_LOG shape.
+        self.events.append((payload.event_type, payload.resource_id))
         return "msg"
 
 

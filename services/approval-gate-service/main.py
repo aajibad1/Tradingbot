@@ -29,6 +29,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 import policy
+from shared.models.audit_log_entry import AuditLogEntry
 from shared.a2a import (
     A2AError,
     AgentCard,
@@ -67,10 +68,22 @@ def _now() -> str:
 
 
 def _emit(event_type: str, proposal: dict) -> None:
+    # AuditLogEntry is the canonical wire shape for Topic.AUDIT_LOG — trade-ledger
+    # validates every message against it, so this must not be an EventEnvelope
+    # (a different, business-event-shaped contract used elsewhere).
     try:
-        get_publisher().publish_event(
-            Topic.AUDIT_LOG, event_type, proposal,
-            producer=PRODUCER, tenant_id=proposal.get("tenant_id"),
+        get_publisher().publish(
+            Topic.AUDIT_LOG,
+            AuditLogEntry(
+                source=PRODUCER,
+                event_type=event_type,
+                actor=proposal.get("decided_by") or proposal.get("agent"),
+                action=proposal.get("action_type"),
+                resource_type="proposal",
+                resource_id=proposal.get("id"),
+                metadata=proposal,
+                emitted_at=datetime.now(timezone.utc),
+            ),
         )
     except Exception:  # noqa: BLE001 — audit is best-effort, never blocks the gate
         logger.warning("governance audit emit failed for %s (non-fatal)", proposal.get("id"))

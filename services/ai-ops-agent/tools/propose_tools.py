@@ -29,6 +29,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from permissions import ToolBlockedError
+from shared.models.audit_log_entry import AuditLogEntry
 from shared.pubsub.publisher import Topic, get_publisher
 
 logger = logging.getLogger(__name__)
@@ -99,10 +100,21 @@ def _publish(proposal: Proposal) -> dict[str, str]:
             "approval_required": "slack",
         },
     )
-    # Mirror to audit log — every proposal must leave a record.
+    # Mirror to audit log — every proposal must leave a record. AuditLogEntry is
+    # the canonical wire shape for Topic.AUDIT_LOG (trade-ledger validates every
+    # message against it); a raw Proposal doesn't have the required fields
+    # (source/event_type/emitted_at), so it must be translated, not forwarded.
     publisher.publish(
         Topic.AUDIT_LOG,
-        proposal,
+        AuditLogEntry(
+            source="ai-ops-agent",
+            event_type=f"proposal.{proposal.type}",
+            actor=proposal.proposed_by,
+            action=proposal.type,
+            resource_id=proposal.proposal_id,
+            metadata=proposal.payload,
+            emitted_at=proposal.proposed_at,
+        ),
         attributes={
             "source": "ai-ops-agent",
             "event": f"proposal.{proposal.type}",

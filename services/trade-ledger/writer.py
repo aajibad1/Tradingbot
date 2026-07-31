@@ -16,6 +16,7 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
+from shared.models.audit_log_entry import AuditLogEntry
 from shared.models.exchange_tick import ExchangeTick
 from shared.models.funding_rate import FundingRate
 from shared.models.movement_signal import MovementSignal
@@ -167,18 +168,18 @@ def risk_alert_to_row(payload: dict) -> dict:
     }
 
 
-def audit_log_to_row(payload: dict) -> dict:
+def audit_log_to_row(entry: AuditLogEntry) -> dict:
     """Audit log entries from all services."""
     return {
-        "event_id": payload.get("event_id"),
-        "source": payload["source"],
-        "event_type": payload["event_type"],
-        "actor": payload.get("actor"),
-        "action": payload.get("action"),
-        "resource_type": payload.get("resource_type"),
-        "resource_id": payload.get("resource_id"),
-        "metadata": payload.get("metadata"),
-        "emitted_at": payload["emitted_at"],
+        "event_id": entry.event_id,
+        "source": entry.source,
+        "event_type": entry.event_type,
+        "actor": entry.actor,
+        "action": entry.action,
+        "resource_type": entry.resource_type,
+        "resource_id": entry.resource_id,
+        "metadata": entry.metadata,
+        "emitted_at": entry.emitted_at.isoformat(),
     }
 
 
@@ -264,9 +265,9 @@ def write_risk_alert(payload: dict) -> None:
     _stream(_table("arb_risk", "risk_events"), risk_alert_to_row(payload), row_id=row_id)
 
 
-def write_audit_log(payload: dict) -> None:
-    row_id = payload.get("event_id") or f"{payload['source']}:{payload['event_type']}:{payload['emitted_at']}"
-    _stream(_table("arb_audit", "audit_log"), audit_log_to_row(payload), row_id=row_id)
+def write_audit_log(entry: AuditLogEntry) -> None:
+    # event_id always has a value (AuditLogEntry.event_id auto-generates one).
+    _stream(_table("arb_audit", "audit_log"), audit_log_to_row(entry), row_id=entry.event_id)
 
 
 def write_risk_decision(decision: RiskDecision) -> None:

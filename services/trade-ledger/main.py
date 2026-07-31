@@ -27,6 +27,7 @@ from fastapi.responses import Response
 
 import writer
 from shared.pubsub.publisher import pubsub_project_id
+from shared.models.audit_log_entry import AuditLogEntry
 from shared.models.exchange_tick import ExchangeTick
 from shared.models.funding_rate import FundingRate
 from shared.models.opportunity import Opportunity
@@ -154,8 +155,8 @@ def _on_signal(message) -> None:
 
 def _on_audit_log(message) -> None:
     try:
-        payload = json.loads(message.data.decode("utf-8"))
-        writer.write_audit_log(payload)
+        entry = AuditLogEntry(**json.loads(message.data.decode("utf-8")))
+        writer.write_audit_log(entry)
         message.ack()
     except Exception:
         logger.exception("failed to write audit log")

@@ -37,9 +37,13 @@ def test_propose_risk_limit_change_publishes_event() -> None:
         assert payload.slack_approval_required is True
         assert result["status"] == "queued_for_human_approval"
         assert result["approval_channel"] == "slack"
-        # Audit-log mirror
+        # Audit-log mirror — a canonical AuditLogEntry, not the raw Proposal
+        # (trade-ledger validates every Topic.AUDIT_LOG message against it).
         assert audit_call.args[0] == Topic.AUDIT_LOG
-        assert audit_call.args[1].proposal_id == payload.proposal_id
+        entry = audit_call.args[1]
+        assert entry.source == "ai-ops-agent"
+        assert entry.resource_id == payload.proposal_id
+        assert entry.event_type == f"proposal.{payload.type}"
 
 
 def test_propose_size_adjustment_publishes_event() -> None:
