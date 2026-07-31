@@ -36,6 +36,7 @@ from shared.models.exchange_tick import ExchangeTick
 from shared.models.funding_rate import FundingRate
 from shared.models.opportunity import Opportunity, StrategyType
 from shared.models.movement_signal import MovementSignal
+from shared.models.risk_alert import RiskAlert
 from shared.models.risk_decision import RiskDecision
 from shared.models.trade import Trade, TradeLeg, TradeStatus, TradeType
 
@@ -134,11 +135,11 @@ def _funding_row() -> dict:
 
 
 def _risk_event_row() -> dict:
-    return risk_alert_to_row({
-        "alert_type": "drawdown_breach", "severity": "critical", "message": "x",
-        "rule": "max_daily_loss_pct", "observed": 1.5, "limit": 1.0,
-        "source": "risk-engine", "emitted_at": "2026-01-01T00:00:00Z",
-    })
+    return risk_alert_to_row(RiskAlert(
+        alert_type="drawdown_breach", severity="critical", message="x",
+        rule="max_daily_loss_pct", observed=1.5, limit_value=1.0,
+        source="risk-engine", emitted_at=datetime(2026, 1, 1),
+    ))
 
 
 def _audit_row() -> dict:

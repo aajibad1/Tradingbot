@@ -6,6 +6,7 @@ from shared.models.audit_log_entry import AuditLogEntry
 from shared.models.funding_rate import FundingRate
 from shared.models.movement_signal import MovementSignal
 from shared.models.opportunity import Opportunity, StrategyType
+from shared.models.risk_alert import RiskAlert
 from shared.models.trade import Trade, TradeLeg, TradeStatus, TradeType
 
 
@@ -97,21 +98,21 @@ def test_funding_to_row_includes_source() -> None:
 
 
 def test_risk_alert_to_row_uses_limit_value() -> None:
-    """Verify risk_alert_to_row maps 'limit' payload field to 'limit_value' column."""
-    payload = {
-        "alert_type": "drawdown_breach",
-        "severity": "critical",
-        "message": "Daily drawdown exceeded limit",
-        "rule": "max_daily_drawdown_pct",
-        "observed": 12.5,
-        "limit": 10.0,
-        "source": "risk-engine",
-        "emitted_at": "2026-01-01T12:00:00Z",
-    }
-    row = risk_alert_to_row(payload)
+    """Verify risk_alert_to_row produces the limit_value BigQuery column."""
+    alert = RiskAlert(
+        alert_type="drawdown_breach",
+        severity="critical",
+        message="Daily drawdown exceeded limit",
+        rule="max_daily_drawdown_pct",
+        observed=12.5,
+        limit_value=10.0,
+        source="risk-engine",
+        emitted_at=datetime(2026, 1, 1, 12, 0, 0),
+    )
+    row = risk_alert_to_row(alert)
     assert row["alert_type"] == "drawdown_breach"
     assert row["severity"] == "critical"
-    assert row["limit_value"] == 10.0  # mapped from payload["limit"]
+    assert row["limit_value"] == 10.0
     assert row["observed"] == 12.5
     assert "limit" not in row  # should not have the old key
 

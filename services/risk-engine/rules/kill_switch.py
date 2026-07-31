@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 import httpx
 
 import state as state_module
+from shared.models.risk_alert import RiskAlert
 from shared.models.risk_state import KillSwitchState
 from shared.pubsub.publisher import Topic, get_publisher
 from shared.tenant import DEFAULT_TENANT
@@ -117,6 +118,11 @@ def clear_kill_switch(
 def _publish_kill_switch_event(state: KillSwitchState) -> None:
     """Publish a KILL_SWITCH_ACTIVATED event to ``Topic.RISK_ALERTS``.
 
+    RiskAlert is the canonical wire shape for this topic — trade-ledger
+    validates every message against it (services/trade-ledger/main.py:
+    _on_risk_alert), so the raw KillSwitchState (active/triggered_at/
+    triggered_by/reason) must be translated, not forwarded as-is.
+
     Errors are logged and swallowed — a Pub/Sub outage must never prevent the
     in-Redis kill switch from being honoured (Redis is the contract).
     """
@@ -124,7 +130,14 @@ def _publish_kill_switch_event(state: KillSwitchState) -> None:
         publisher = get_publisher()
         publisher.publish(
             Topic.RISK_ALERTS,
-            state,
+            RiskAlert(
+                alert_type="kill_switch_activated",
+                severity="critical",
+                message=f"Kill switch activated by {state.triggered_by}: {state.reason}",
+                rule="kill_switch",
+                source="risk-engine",
+                emitted_at=state.triggered_at or datetime.utcnow(),
+            ),
             attributes={"event": "KILL_SWITCH_ACTIVATED", "source": "risk-engine"},
         )
     except Exception:  # noqa: BLE001 — alert path is best-effort by design
