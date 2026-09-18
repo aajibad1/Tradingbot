@@ -55,13 +55,15 @@ the yardstick (not re-litigating what's already built):
   multi-step human approval workflow or segregation-of-duties policy for
   *payment* actions specifically (the AI governance approval gate exists for
   *agent* actions, not for payment approval) — see Backlog below.
-- **Milestone 3 (Ledger/Lifecycle): partially met.** `accounts-service` is a
-  real, tested, Decimal-backed (`Numeric(38,8)`), balance-asserting
-  double-entry ledger (`ledger.py`) — this is exactly what the contract's
-  §6.2 ledger invariants require. **Gap:** `wallet-service` (the tenant-facing
-  balance API) uses Python `float` for balances and is explicitly documented
-  in its own module docstring as a sandbox simplification ("production uses
-  Decimal") — not yet wired to `accounts-service`'s ledger. See Backlog.
+- **Milestone 3 (Ledger/Lifecycle): met for money representation, partial
+  on unification.** `accounts-service` is a real, tested, Decimal-backed
+  (`Numeric(38,8)`), balance-asserting double-entry ledger (`ledger.py`) —
+  this is exactly what the contract's §6.2 ledger invariants require.
+  `wallet-service` (the tenant-facing balance API) is now also fully
+  Decimal end-to-end (issue #20, merged) — the float gap is closed.
+  **Remaining gap:** the two services are still independent balance
+  authorities for one concern (`docs/adr/0004`'s "Consequences") — not yet
+  unified. Lower priority now that both are individually Decimal-correct.
 - **Milestone 4 (Provider execution/Reconciliation): met for the sandbox
   scope.** Signed webhook ingestion + verification (`webhook-service/signing.py`,
   HMAC-SHA256 + timestamp), retry/replay (`/v1/webhooks/endpoints/{id}/replay`),
@@ -91,22 +93,32 @@ the yardstick (not re-litigating what's already built):
   workflow w/ segregation-of-duties (P1),
   [#22](https://github.com/aajibad1/Tradingbot/issues/22) KYC/KYB +
   sanctions/PEP screening sandbox adapters (P1, risk:regulatory).
-- Implemented #20: `wallet-service` migrated float→Decimal, wire balances
-  as strings, JSON-float input rejected at the request boundary, 3 new
-  regression tests, verified live (`0.1+0.1+0.1 == "0.30000000"` exactly).
-  Opened [PR #23](https://github.com/aajibad1/Tradingbot/pull/23); sent
-  for independent review per contract §10.3 (ledger change: independent
-  reviewer required, no self-approval) before merge.
+- Implemented and **merged** #20: `wallet-service` migrated float→Decimal
+  end to end (internal representation, wire format, error messages).
+  [PR #23](https://github.com/aajibad1/Tradingbot/pull/23) went through 4
+  rounds of independent review per contract §10.3 (ledger change: no
+  self-approval) — each round found one real, distinct instance of the
+  same underlying bug class (Decimal reaching an output via `str()`/bare
+  interpolation instead of `format(x, "f")`, which silently switches to
+  scientific notation below 1e-6): `_wallet_out`, then a file-path
+  information-disclosure bug the round-1 fix itself introduced in
+  `shared/http`'s new validation-error handler (fixed at the source,
+  benefiting all 18 `install_contract` services), then the sibling
+  `/v1/balances` endpoint, then the `insufficient_funds` error message.
+  Final round used an exhaustive grep across every string-formatting
+  mechanism in the file rather than another manual read, and found
+  nothing further. 17/17 wallet-service tests, full 40-service sweep,
+  ruff/mypy/bandit all clean at merge. This is the clearest evidence yet
+  for why contract §10.3's no-self-approval rule exists — every one of
+  the 3 review-round findings was a real bug I would have shipped.
 - Added this file (`docs/STATUS.md`) as the contract's standing status
   report.
 
 ## In progress
 
-- PR #23 (wallet-service Decimal migration) — awaiting independent review
-  before merge.
-- Next up after #23 merges: issue #22 (KYC/KYB + screening sandbox
+- Next up: issue #22 (KYC/KYB + screening sandbox
   adapters) — highest-priority remaining unblocked P1, no dependency on
-  #21 or #23.
+  #21 or the now-merged #20/#23.
 
 ## Blocked
 
@@ -146,10 +158,10 @@ the yardstick (not re-litigating what's already built):
 
 ## Risks
 
-- **Financial integrity**: `wallet-service` float-based balances are a real
-  gap relative to the contract's §6.1 money-representation invariant. Low
-  *current* risk (SANDBOX-only, single-instance, in-memory — no real funds),
-  but must be closed before any live-money milestone. Tracked in Backlog.
+- **Financial integrity**: `wallet-service`'s float→Decimal gap (issue #20)
+  is closed. Remaining: `accounts-service`/`wallet-service` are still two
+  independent balance authorities — low current risk (SANDBOX-only, no
+  real funds), tracked as a lower-priority follow-up in `docs/adr/0004`.
 - **Security/privacy**: none new identified this cycle beyond what
   `docs/09-security-compliance.md` already tracks as pre-go-live gates.
 - **Compliance/partner**: KYC/KYB/screening simulation gap (see Blocked).
