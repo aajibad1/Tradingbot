@@ -141,9 +141,14 @@ def adjust(wallet_id: str, req: Adjust) -> dict[str, Any]:
     except InvalidOperation as exc:
         raise APIError("invalid_amount", f"amount could not be applied: {exc}", http_status=422) from exc
     if new_balance < 0:
+        # format(x, "f"), not bare f-string interpolation — Decimal's default
+        # __format__ falls back to scientific notation below 1e-6, same as
+        # str(); a rejected sub-micro-unit debit would otherwise leak "-1E-7"
+        # into this partner-facing error message.
         raise APIError(
             "insufficient_funds",
-            f"debit {req.amount} exceeds balance {w['balance']} in wallet {wallet_id}",
+            f"debit {format(req.amount, 'f')} exceeds balance {format(w['balance'], 'f')} "
+            f"in wallet {wallet_id}",
             http_status=409,
         )
     w["balance"] = new_balance

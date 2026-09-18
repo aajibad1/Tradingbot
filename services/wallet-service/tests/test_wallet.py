@@ -48,6 +48,21 @@ def test_overdraft_is_blocked(client):
     assert client.get(f"/v1/wallets/{wid}").json()["balance"] == "10.00000000"
 
 
+def test_overdraft_message_stays_fixed_point_at_sub_micro_unit_magnitude(client):
+    """The insufficient_funds message interpolated req.amount/balance via a
+    bare f-string, which falls back to Decimal.__format__'s default (same
+    scientific-notation behavior as str()) — round 4 caught this as a fourth
+    instance of the same bug class, in the one remaining Decimal-to-output
+    path _wallet_out and /v1/balances's fixes didn't cover."""
+    wid = _wallet(client)["id"]
+    client.post(f"/v1/wallets/{wid}/adjust", json={"amount": "0.00000005"})
+    r = client.post(f"/v1/wallets/{wid}/adjust", json={"amount": "-0.0000001"})
+    assert r.status_code == 409
+    message = r.json()["error"]["message"]
+    assert "E-" not in message and "e-" not in message
+    assert "0.00000005" in message and "-0.0000001" in message
+
+
 def test_zero_amount_rejected(client):
     wid = _wallet(client)["id"]
     r = client.post(f"/v1/wallets/{wid}/adjust", json={"amount": "0"})
