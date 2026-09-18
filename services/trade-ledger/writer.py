@@ -16,10 +16,12 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
+from shared.models.audit_log_entry import AuditLogEntry
 from shared.models.exchange_tick import ExchangeTick
 from shared.models.funding_rate import FundingRate
 from shared.models.movement_signal import MovementSignal
 from shared.models.opportunity import Opportunity
+from shared.models.risk_alert import RiskAlert
 from shared.models.risk_decision import RiskDecision
 from shared.models.trade import Trade
 
@@ -153,32 +155,32 @@ def funding_to_row(rate: FundingRate) -> dict:
     }
 
 
-def risk_alert_to_row(payload: dict) -> dict:
-    """Risk alerts come from multiple producers; passed through as raw dicts."""
+def risk_alert_to_row(alert: RiskAlert) -> dict:
+    """Risk alerts come from multiple producers; RiskAlert is their canonical shape."""
     return {
-        "alert_type": payload["alert_type"],
-        "severity": payload.get("severity", "info"),
-        "message": payload.get("message", ""),
-        "rule": payload.get("rule"),
-        "observed": payload.get("observed"),
-        "limit_value": payload.get("limit"),
-        "source": payload.get("source"),
-        "emitted_at": payload["emitted_at"],
+        "alert_type": alert.alert_type,
+        "severity": alert.severity,
+        "message": alert.message,
+        "rule": alert.rule,
+        "observed": alert.observed,
+        "limit_value": alert.limit_value,
+        "source": alert.source,
+        "emitted_at": alert.emitted_at.isoformat(),
     }
 
 
-def audit_log_to_row(payload: dict) -> dict:
+def audit_log_to_row(entry: AuditLogEntry) -> dict:
     """Audit log entries from all services."""
     return {
-        "event_id": payload.get("event_id"),
-        "source": payload["source"],
-        "event_type": payload["event_type"],
-        "actor": payload.get("actor"),
-        "action": payload.get("action"),
-        "resource_type": payload.get("resource_type"),
-        "resource_id": payload.get("resource_id"),
-        "metadata": payload.get("metadata"),
-        "emitted_at": payload["emitted_at"],
+        "event_id": entry.event_id,
+        "source": entry.source,
+        "event_type": entry.event_type,
+        "actor": entry.actor,
+        "action": entry.action,
+        "resource_type": entry.resource_type,
+        "resource_id": entry.resource_id,
+        "metadata": entry.metadata,
+        "emitted_at": entry.emitted_at.isoformat(),
     }
 
 
@@ -259,14 +261,15 @@ def write_funding(rate: FundingRate) -> None:
     _stream(_table("arb_trading", "funding_events"), funding_to_row(rate), row_id=row_id)
 
 
-def write_risk_alert(payload: dict) -> None:
-    row_id = payload.get("event_id") or f"{payload.get('alert_type')}:{payload['emitted_at']}"
-    _stream(_table("arb_risk", "risk_events"), risk_alert_to_row(payload), row_id=row_id)
+def write_risk_alert(alert: RiskAlert) -> None:
+    # No natural id — an alert_type/timestamp pair uniquely identifies one alert.
+    row_id = f"{alert.alert_type}:{alert.emitted_at.isoformat()}"
+    _stream(_table("arb_risk", "risk_events"), risk_alert_to_row(alert), row_id=row_id)
 
 
-def write_audit_log(payload: dict) -> None:
-    row_id = payload.get("event_id") or f"{payload['source']}:{payload['event_type']}:{payload['emitted_at']}"
-    _stream(_table("arb_audit", "audit_log"), audit_log_to_row(payload), row_id=row_id)
+def write_audit_log(entry: AuditLogEntry) -> None:
+    # event_id always has a value (AuditLogEntry.event_id auto-generates one).
+    _stream(_table("arb_audit", "audit_log"), audit_log_to_row(entry), row_id=entry.event_id)
 
 
 def write_risk_decision(decision: RiskDecision) -> None:

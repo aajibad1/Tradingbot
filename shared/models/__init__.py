@@ -1,6 +1,8 @@
+from shared.models.audit_log_entry import AuditLogEntry
 from shared.models.exchange_tick import ExchangeTick, OrderBookLevel, OrderBookSnapshot
 from shared.models.funding_rate import FundingRate
 from shared.models.opportunity import Opportunity, StrategyType
+from shared.models.risk_alert import RiskAlert
 from shared.models.risk_state import KillSwitchState, RiskState, RiskViolation
 from shared.models.trade import Trade, TradeLeg, TradeStatus, TradeType
 
@@ -9,12 +11,14 @@ from shared.models.trade import Trade, TradeLeg, TradeStatus, TradeType
 # values from the sentiment:* Redis namespace instead.
 
 __all__ = [
+    "AuditLogEntry",
     "ExchangeTick",
     "FundingRate",
     "KillSwitchState",
     "Opportunity",
     "OrderBookLevel",
     "OrderBookSnapshot",
+    "RiskAlert",
     "RiskState",
     "RiskViolation",
     "StrategyType",

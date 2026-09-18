@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Agent-governance smoke — proves the doc-10 safety controls against LIVE services.
-# No GCP/Redis (in-memory sandbox). Two flows:
+# No GCP/Redis (in-memory sandbox). Three flows:
 #
 #   approval-gate : read→auto-approved, sensitive→human, withdrawal→hard-blocked
 #   registry+evals: a prompt version cannot be ACTIVATED until it has a passing eval
+#   ai-ops-agent   : a PROPOSE-tier tool call registers with approval-gate-service
+#                    over A2A (opt-in APPROVAL_GATE_URL) — not just Pub/Sub+Slack
 #
 # Requirements: python3 with each service's requirements installed, curl.
 # Usage: ./scripts/governance_smoke.sh
@@ -13,7 +15,7 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-GATE=${GATE:-8261} EVALS=${EVALS:-8262} REG=${REG:-8263}
+GATE=${GATE:-8261} EVALS=${EVALS:-8262} REG=${REG:-8263} AIOPS=${AIOPS:-8264}
 LOG_DIR="$(mktemp -d)"
 PIDS=()
 FAILS=0
@@ -56,9 +58,11 @@ note "Booting governance services"
 start approval-gate-service "$GATE"
 start agent-evals           "$EVALS"
 start agent-registry        "$REG" AGENT_EVALS_URL="$L:$EVALS"
+start ai-ops-agent          "$AIOPS" APPROVAL_GATE_URL="$L:$GATE"
 wait_healthy approval-gate-service "$GATE"
 wait_healthy agent-evals "$EVALS"
 wait_healthy agent-registry "$REG"
+wait_healthy ai-ops-agent "$AIOPS"
 
 # ── approval-gate permission model ───────────────────────────────────────────
 note "1) approval-gate: read-only action → auto-approved"
@@ -102,6 +106,22 @@ curl -s "$L:$EVALS/v1/evals/run" -H 'content-type: application/json' \
   -d '{"agent":"ranker","prompt_version":"v1","metrics":{"accuracy":0.92,"hallucination_rate":0.01,"latency_ms":900}}' >/dev/null
 A=$(curl -s "$L:$REG/v1/agents/ranker/activate" -H 'content-type: application/json' -d '{"version":"v1"}' | field active)
 [[ "$A" == "v1" ]] && ok "passing eval → activated v1" || bad "expected active=v1, got $A"
+
+# ── ai-ops-agent → approval-gate-service (docs/10 defense-in-depth) ─────────
+note "8) ai-ops-agent PROPOSE tool → registers with approval-gate-service over A2A"
+INVOKE=$(curl -s "$L:$AIOPS/tools/propose_size_adjustment/invoke" -H 'content-type: application/json' \
+  -d '{"args":{"new_size_usd":15000.0,"rationale":"governance smoke"}}')
+AIOPS_ID=$(echo "$INVOKE" | field proposal_id)
+[[ -n "$AIOPS_ID" && "$AIOPS_ID" != None ]] && ok "propose_size_adjustment queued: $AIOPS_ID" \
+  || bad "propose_size_adjustment did not return a proposal_id: $INVOKE"
+GATED=$(curl -s "$L:$GATE/v1/proposals?agent=ai-ops-agent" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+matches = [p for p in d['proposals'] if p['payload'].get('ai_ops_proposal_id') == '$AIOPS_ID']
+print(matches[0]['classification'] if matches else 'MISSING')
+")
+[[ "$GATED" == "pending_approval" ]] && ok "approval-gate-service holds the SAME proposal, classification=pending_approval" \
+  || bad "expected the ai-ops proposal in approval-gate-service as pending_approval, got: $GATED"
 
 note "Verdict"
 if [[ "$FAILS" -eq 0 ]]; then

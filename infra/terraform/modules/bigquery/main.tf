@@ -54,16 +54,24 @@ locals {
       clustering        = ["alert_type", "severity"]
     }
     audit_log = {
-      dataset           = "arb_risk"
+      dataset           = "arb_audit"
       schema_file       = "${path.module}/schemas/audit_log.json"
       time_partitioning = "emitted_at"
-      clustering        = ["source", "event"]
+      clustering        = ["source", "event_type"]
     }
     risk_decisions = {
       dataset           = "arb_ml"
       schema_file       = "${path.module}/schemas/risk_decisions.json"
       time_partitioning = "decided_at"
       clustering        = ["strategy", "approved"]
+    }
+    # Every signal-engine detection (the learning layer's substrate). Keep
+    # forever — labels accrue after the fact via signal-replay-service.
+    signals = {
+      dataset           = "arb_ml"
+      schema_file       = "${path.module}/schemas/signals.json"
+      time_partitioning = "detected_at"
+      clustering        = ["family", "regime"]
     }
     # High-volume live market-data ticks (trade-ledger forward-collects when
     # ENABLE_TICK_COLLECTION=true). 90-day expiry via the arb_market_data dataset.

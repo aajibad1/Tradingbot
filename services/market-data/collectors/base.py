@@ -6,6 +6,11 @@ reconnect with exponential backoff, normalize ticks, publish to Pub/Sub.
 
 Latency observations are also pushed into Redis so the risk-engine can read
 them via `check_exchange_health`.
+
+Config (env):
+  VENUE_ANOMALY_URL — opt-in: on each heartbeat, POST this venue's staleness +
+  spread to venue-anomaly-detector's /detect (fail-soft; a push failure never
+  disrupts the watch loop). See venue_signals() for what is/isn't reported.
 """
 
 from __future__ import annotations
@@ -17,6 +22,8 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
+
+import httpx
 
 from shared.connectors import VenueHealth
 from shared.models.exchange_tick import ExchangeTick
@@ -66,6 +73,8 @@ class BaseCollector:
         self._stopping = asyncio.Event()
         self._last_message_at: float = 0.0
         self._last_latency_ms: int = 0
+        self._last_bid: float | None = None
+        self._last_ask: float | None = None
         self._client: Any | None = None
 
     def is_healthy(self) -> bool:
@@ -141,6 +150,7 @@ class BaseCollector:
                     self._record_latency(self._last_latency_ms)
                     tick = self._to_exchange_tick(symbol, ticker)
                     if tick is not None:
+                        self._last_bid, self._last_ask = tick.bid, tick.ask
                         # Fire-and-forget: blocking on the publish future here
                         # would stall this exchange's whole watch fan-out.
                         self.publisher.publish_nowait(
@@ -171,6 +181,7 @@ class BaseCollector:
             while not self._stopping.is_set():
                 await asyncio.sleep(_HEALTH_HEARTBEAT_S)
                 self._record_latency(self._last_latency_ms)
+                await self._push_anomaly_signals()
 
         watchers = [asyncio.create_task(_watch_one(s)) for s in self.config.symbols]
         heartbeat = asyncio.create_task(_heartbeat())
@@ -181,6 +192,44 @@ class BaseCollector:
             for t in watchers:
                 t.cancel()
             await asyncio.gather(heartbeat, *watchers, return_exceptions=True)
+
+    def venue_signals(self, now: float | None = None) -> dict[str, Any] | None:
+        """The two feed-health signals this collector can measure with
+        confidence: staleness (time since the last message) and spread (from
+        the last-seen tick). None before the first tick arrives — there is
+        nothing to report yet, not a zero-staleness feed.
+
+        Deliberately omits ``expected_spread_bps``/``sequence_gap_rate``/
+        ``update_rate_ratio``/``rejection_rate`` — this collector has no
+        reliable baseline for any of them, and venue-anomaly-detector's
+        ``detect()`` treats an omitted signal as "no evidence of an anomaly
+        here" (safe defaults), never as a false floor/ceiling."""
+        if self._last_bid is None or self._last_ask is None:
+            return None
+        now = now if now is not None else time.time()
+        mid = (self._last_bid + self._last_ask) / 2.0
+        spread_bps = (self._last_ask - self._last_bid) / mid * 10_000.0 if mid > 0 else 0.0
+        return {
+            "venue": self.config.exchange,
+            "quote_staleness_ms": max(0.0, (now - self._last_message_at) * 1000.0),
+            "spread_bps": spread_bps,
+        }
+
+    async def _push_anomaly_signals(self) -> None:
+        """Push this venue's feed-health signals to venue-anomaly-detector
+        (opt-in via VENUE_ANOMALY_URL; fail-soft — a reporting hiccup must
+        never disrupt the collector's own watch loop)."""
+        base = os.environ.get("VENUE_ANOMALY_URL")
+        if not base:
+            return
+        signals = self.venue_signals()
+        if signals is None:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                await client.post(f"{base.rstrip('/')}/detect", json=signals)
+        except Exception:
+            logger.warning("venue-anomaly-detector push failed for %s", self.config.exchange)
 
     def _record_latency(self, latency_ms: int) -> None:
         if self.redis is None:

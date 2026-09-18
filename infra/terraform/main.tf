@@ -55,6 +55,10 @@ locals {
     # substrate (AI Phase A). trade-ledger streams these to arb_ml.risk_decisions.
     "arb-risk-decisions",
     "arb-trade-fills",
+    # Every signal-engine detection, journaled for the learning layer (docs/03):
+    # trade-ledger streams it to arb_ml.signals; signal-replay-service joins it
+    # against arb-trade-fills to label true/false-positive and decay.
+    "arb-signals",
     "arb-ai-proposals",
     "arb-audit-log",
     # Provisioned ahead of its consumer so a publish to Topic.SENTIMENT_EVENTS
@@ -74,6 +78,7 @@ locals {
   subscriptions = {
     "arb-market-data-opp-engine"    = "arb-market-data"
     "arb-funding-rates-opp-engine"  = "arb-funding-rates"
+    "arb-funding-rates-ledger"      = "arb-funding-rates"
     "arb-opportunities-risk-engine" = "arb-opportunities"
     "arb-opportunities-ledger"      = "arb-opportunities"
     # Executors consume APPROVED opportunities (post risk-engine bridge), not the raw feed.
@@ -87,6 +92,10 @@ locals {
     "arb-trade-fills-risk-engine" = "arb-trade-fills"
     "arb-ai-proposals-ledger"     = "arb-ai-proposals"
     "arb-audit-log-ledger"        = "arb-audit-log"
+    "arb-signals-ledger"          = "arb-signals"
+    # signal-replay-service joins these two on signal_id == opportunity_id.
+    "arb-signals-replay"     = "arb-signals"
+    "arb-trade-fills-replay" = "arb-trade-fills"
     # Africa corridor alerts → notification-dispatcher (ops alert).
     "arb-corridor-alerts-dispatcher" = "arb-corridor-alerts"
     # API plane (sandbox): settlement-status + webhook-service consume funding/payout events.
@@ -99,7 +108,8 @@ locals {
   # BigQuery datasets — table-expiration rules:
   #   arb_market_data → 90d (high-volume ticks)
   #   arb_trading     → no expiration (7-year IRS / Form 8949 retention)
-  #   arb_risk        → no expiration (forever; audit)
+  #   arb_risk        → no expiration (forever; risk events + kill-switch alerts)
+  #   arb_audit       → no expiration (forever; system-wide audit log)
   #   arb_ai_ops      → 365d
   datasets = {
     arb_market_data = {
@@ -111,7 +121,11 @@ locals {
       default_table_expiry_days = 0
     }
     arb_risk = {
-      description               = "Risk events + kill-switch audit log; retained indefinitely."
+      description               = "Risk events + kill-switch alerts; retained indefinitely."
+      default_table_expiry_days = 0
+    }
+    arb_audit = {
+      description               = "System-wide audit log (services/trade-ledger/schema/audit_log.sql); retained indefinitely."
       default_table_expiry_days = 0
     }
     arb_ai_ops = {
@@ -183,6 +197,8 @@ locals {
         "arb-risk-decisions-ledger",
         "arb-audit-log-ledger",
         "arb-ai-proposals-ledger",
+        "arb-signals-ledger",
+        "arb-funding-rates-ledger",
         # Forward tick collection → arb_market_data.ticks (gated by env below).
         "arb-market-data-ledger",
       ]
@@ -305,23 +321,26 @@ locals {
     # Inter-service HTTP URLs (gateway→upstreams, portal, admin, billing→metering,
     # registry→evals) are wired POST-deploy by scripts/wire_api_plane_urls.sh —
     # same convention as core-api's ACCOUNTS_SERVICE_URL (avoids a Cloud Run url cycle).
-    "partner-auth"                  = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
-    "public-api-gateway"            = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
-    "routing-service"               = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
-    "wallet-service"                = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
-    "api-metering"                  = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
-    "connector-runtime"             = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
-    "agent-registry"                = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
-    "agent-evals"                   = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
-    "developer-portal"              = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
-    "admin-console"                 = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
-    "status-service"                = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
-    "signal-engine"                 = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
-    "regime-classifier"             = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
-    "movement-feature-builder"      = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
-    "route-optimizer"               = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
-    "venue-anomaly-detector"        = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
-    "signal-replay-service"         = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "partner-auth"       = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "public-api-gateway" = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "routing-service"    = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "wallet-service"     = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "api-metering"       = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "connector-runtime"  = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "agent-registry"     = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "agent-evals"        = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "developer-portal"   = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "admin-console"      = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "status-service"     = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    # Journals every emitted signal to arb-signals (the learning layer's substrate).
+    "signal-engine"            = { secrets = [], publish_topics = ["arb-signals"], subscribe_subs = [], cpu_idle = true }
+    "regime-classifier"        = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "movement-feature-builder" = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "route-optimizer"          = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    "venue-anomaly-detector"   = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
+    # Joins arb-signals (predictions) against arb-trade-fills (realized outcomes)
+    # on signal_id == opportunity_id — see services/signal-replay-service/journal.py.
+    "signal-replay-service"         = { secrets = [], publish_topics = [], subscribe_subs = ["arb-signals-replay", "arb-trade-fills-replay"], cpu_idle = true }
     "corridor-intelligence-service" = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
     "debate-service"                = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }
     "account-link-service"          = { secrets = [], publish_topics = [], subscribe_subs = [], cpu_idle = true }

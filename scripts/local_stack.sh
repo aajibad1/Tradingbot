@@ -95,8 +95,11 @@ bring_up accounts-service accounts-service 8090 "$(SQLITE accounts-service)"
 bring_up core-api core-api 8080 "$(SQLITE core-api)" \
   ACCOUNTS_SERVICE_URL="http://127.0.0.1:8090" STRIPE_WEBHOOK_SECRET="whsec_local"
 
-# Execution wedge.
-bring_up risk-engine risk-engine 8082 KILL_SWITCH_RESET_TOKEN="$RESET_TOKEN"
+# Execution wedge. OPPORTUNITY_RANKER_URL points at the advisory ranker booted
+# below — risk-engine calls it fail-open (docs/03), so pointing at it here just
+# means the advisory path is actually exercised instead of silently unconfigured.
+bring_up risk-engine risk-engine 8082 \
+  KILL_SWITCH_RESET_TOKEN="$RESET_TOKEN" OPPORTUNITY_RANKER_URL="http://127.0.0.1:8085"
 bring_up paper-trader paper-trader 8081
 bring_up opportunity-engine opportunity-engine 8083
 bring_up trade-ledger trade-ledger 8084
@@ -114,7 +117,7 @@ bring_up debate-service debate-service 8340
 bring_up approval-gate-service approval-gate-service 8341
 bring_up agent-evals agent-evals 8343
 bring_up agent-registry agent-registry 8342 A2A_AGENT_EVALS_URL="http://127.0.0.1:8343"
-bring_up ai-ops-agent ai-ops-agent 8344
+bring_up ai-ops-agent ai-ops-agent 8344 APPROVAL_GATE_URL="http://127.0.0.1:8341"
 
 # Status aggregator LAST — point it at the mesh it just brought up so /status and
 # /slo reflect the real local services (advisory ones only DEGRADE, never DOWN).

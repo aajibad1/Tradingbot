@@ -37,9 +37,13 @@ def test_propose_risk_limit_change_publishes_event() -> None:
         assert payload.slack_approval_required is True
         assert result["status"] == "queued_for_human_approval"
         assert result["approval_channel"] == "slack"
-        # Audit-log mirror
+        # Audit-log mirror — a canonical AuditLogEntry, not the raw Proposal
+        # (trade-ledger validates every Topic.AUDIT_LOG message against it).
         assert audit_call.args[0] == Topic.AUDIT_LOG
-        assert audit_call.args[1].proposal_id == payload.proposal_id
+        entry = audit_call.args[1]
+        assert entry.source == "ai-ops-agent"
+        assert entry.resource_id == payload.proposal_id
+        assert entry.event_type == f"proposal.{payload.type}"
 
 
 def test_propose_size_adjustment_publishes_event() -> None:
@@ -110,3 +114,48 @@ def test_audit_log_attributes_identify_source() -> None:
         assert attrs.get("source") == "ai-ops-agent"
         assert attrs.get("event", "").startswith("proposal.")
         assert "proposal_id" in attrs
+
+
+# --- approval-gate-service registration (opt-in via APPROVAL_GATE_URL) ------ #
+
+
+def test_approval_gate_not_contacted_when_url_unset(monkeypatch) -> None:
+    """Default (no APPROVAL_GATE_URL): no A2A call is attempted at all — the
+    Slack/Pub/Sub flow above is unaffected and this stays a pure no-op."""
+    monkeypatch.delenv("APPROVAL_GATE_URL", raising=False)
+    with patch("tools.propose_tools.get_publisher"), \
+         patch("shared.a2a.A2AClient") as client_cls:
+        propose_size_adjustment(5_000.0, "no gate configured")
+        client_cls.assert_not_called()
+
+
+def test_approval_gate_registered_when_url_set(monkeypatch) -> None:
+    monkeypatch.setenv("APPROVAL_GATE_URL", "http://approval-gate.local")
+    with patch("tools.propose_tools.get_publisher") as gp, \
+         patch("shared.a2a.A2AClient") as client_cls:
+        instance = client_cls.return_value
+        result = propose_strategy_pause("cross_exchange", "spreads too tight")
+
+        client_cls.assert_called_once()
+        assert client_cls.call_args.args[0] == "http://approval-gate.local"
+        instance.send_data.assert_called_once()
+        sent = instance.send_data.call_args.args[0]
+        assert sent["action_type"] == "strategy_pause"
+        assert sent["payload"]["strategy"] == "cross_exchange"
+        assert sent["payload"]["ai_ops_proposal_id"] == result["proposal_id"]
+        # The primary Slack flow is unaffected by this best-effort side channel.
+        assert gp.return_value.publish.call_count == 2
+
+
+def test_approval_gate_registration_is_fail_soft(monkeypatch) -> None:
+    """An approval-gate-service outage must never break the primary proposal
+    flow — the Slack/audit publishes still succeed and the caller still gets
+    a normal response."""
+    monkeypatch.setenv("APPROVAL_GATE_URL", "http://approval-gate.local")
+    with patch("tools.propose_tools.get_publisher") as gp, \
+         patch("shared.a2a.A2AClient") as client_cls:
+        client_cls.return_value.send_data.side_effect = ConnectionError("unreachable")
+        result = propose_size_adjustment(2_500.0, "gate is down")
+
+        assert result["status"] == "queued_for_human_approval"
+        assert gp.return_value.publish.call_count == 2

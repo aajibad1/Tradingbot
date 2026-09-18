@@ -27,10 +27,12 @@ from fastapi.responses import Response
 
 import writer
 from shared.pubsub.publisher import pubsub_project_id
+from shared.models.audit_log_entry import AuditLogEntry
 from shared.models.exchange_tick import ExchangeTick
 from shared.models.funding_rate import FundingRate
 from shared.models.opportunity import Opportunity
 from shared.models.movement_signal import MovementSignal
+from shared.models.risk_alert import RiskAlert
 from shared.models.risk_decision import RiskDecision
 from shared.models.trade import Trade
 from exec_quality import route_quality
@@ -124,8 +126,8 @@ def _on_funding(message) -> None:
 
 def _on_risk_alert(message) -> None:
     try:
-        payload = json.loads(message.data.decode("utf-8"))
-        writer.write_risk_alert(payload)
+        alert = RiskAlert(**json.loads(message.data.decode("utf-8")))
+        writer.write_risk_alert(alert)
         message.ack()
     except Exception:
         logger.exception("failed to write risk alert")
@@ -154,8 +156,8 @@ def _on_signal(message) -> None:
 
 def _on_audit_log(message) -> None:
     try:
-        payload = json.loads(message.data.decode("utf-8"))
-        writer.write_audit_log(payload)
+        entry = AuditLogEntry(**json.loads(message.data.decode("utf-8")))
+        writer.write_audit_log(entry)
         message.ack()
     except Exception:
         logger.exception("failed to write audit log")

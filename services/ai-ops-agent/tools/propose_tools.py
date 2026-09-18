@@ -8,11 +8,20 @@ approved, rejected, or expires.
 
 The execution path that picks up an approval lives in
 execution-orchestrator's approval gate.
+
+Config (env):
+  APPROVAL_GATE_URL — opt-in: also register the proposal with
+  approval-gate-service (docs/10's agent-agnostic policy classifier + audit
+  trail) over A2A. Best-effort — the Slack flow above is the primary control
+  and must never block on this; an outage here only means the proposal is
+  missing from that service's own /v1/proposals view, not unrecorded (the
+  arb-audit-log mirror above still holds).
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -20,6 +29,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from permissions import ToolBlockedError
+from shared.models.audit_log_entry import AuditLogEntry
 from shared.pubsub.publisher import Topic, get_publisher
 
 logger = logging.getLogger(__name__)
@@ -53,6 +63,26 @@ class Proposal(BaseModel):
     slack_approval_required: bool = True
 
 
+def _register_with_approval_gate(proposal: Proposal) -> None:
+    """Also register the proposal with approval-gate-service over A2A (opt-in
+    via APPROVAL_GATE_URL; best-effort — see module docstring)."""
+    base = os.environ.get("APPROVAL_GATE_URL")
+    if not base:
+        return
+    try:
+        from shared.a2a import A2AClient
+
+        A2AClient(base, timeout=3.0).send_data({
+            "agent": proposal.proposed_by,
+            "action_type": proposal.type,
+            "summary": proposal.rationale,
+            "payload": {**proposal.payload, "ai_ops_proposal_id": proposal.proposal_id},
+        })
+    except Exception:
+        logger.warning("approval-gate-service registration failed for proposal %s (non-fatal)",
+                       proposal.proposal_id)
+
+
 def _publish(proposal: Proposal) -> dict[str, str]:
     """Publish to AI_PROPOSALS AND AUDIT_LOG. Both must succeed.
 
@@ -70,10 +100,21 @@ def _publish(proposal: Proposal) -> dict[str, str]:
             "approval_required": "slack",
         },
     )
-    # Mirror to audit log — every proposal must leave a record.
+    # Mirror to audit log — every proposal must leave a record. AuditLogEntry is
+    # the canonical wire shape for Topic.AUDIT_LOG (trade-ledger validates every
+    # message against it); a raw Proposal doesn't have the required fields
+    # (source/event_type/emitted_at), so it must be translated, not forwarded.
     publisher.publish(
         Topic.AUDIT_LOG,
-        proposal,
+        AuditLogEntry(
+            source="ai-ops-agent",
+            event_type=f"proposal.{proposal.type}",
+            actor=proposal.proposed_by,
+            action=proposal.type,
+            resource_id=proposal.proposal_id,
+            metadata=proposal.payload,
+            emitted_at=proposal.proposed_at,
+        ),
         attributes={
             "source": "ai-ops-agent",
             "event": f"proposal.{proposal.type}",
@@ -85,6 +126,7 @@ def _publish(proposal: Proposal) -> dict[str, str]:
         proposal.proposal_id,
         proposal.type,
     )
+    _register_with_approval_gate(proposal)
     return {
         "proposal_id": proposal.proposal_id,
         "status": "queued_for_human_approval",

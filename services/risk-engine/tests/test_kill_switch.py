@@ -10,6 +10,8 @@ Covers:
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from rules.kill_switch import (
@@ -17,6 +19,7 @@ from rules.kill_switch import (
     is_kill_switch_active,
     trigger_kill_switch,
 )
+from shared.pubsub.publisher import Topic
 
 
 def test_trigger_sets_redis_flag(fake_redis) -> None:
@@ -72,3 +75,22 @@ def test_reset_raises_when_env_var_unset(fake_redis, monkeypatch) -> None:
 
     with pytest.raises(RuntimeError):
         clear_kill_switch(fake_redis, auth_token="anything", reset_by="ops")
+
+
+def test_trigger_publishes_a_risk_alert_not_the_raw_state(fake_redis) -> None:
+    """RiskAlert is the canonical Topic.RISK_ALERTS shape — trade-ledger's
+    _on_risk_alert validates every message against it. Publishing the bare
+    KillSwitchState (no alert_type/emitted_at) used to raise KeyError on the
+    consumer side for every single kill-switch event."""
+    with patch("rules.kill_switch.get_publisher") as gp:
+        publisher = gp.return_value
+        trigger_kill_switch(fake_redis, triggered_by="ops", reason="drawdown breach")
+
+        publisher.publish.assert_called_once()
+        topic, alert = publisher.publish.call_args.args
+        assert topic is Topic.RISK_ALERTS
+        assert alert.alert_type == "kill_switch_activated"
+        assert alert.severity == "critical"
+        assert "ops" in alert.message and "drawdown breach" in alert.message
+        assert alert.source == "risk-engine"
+        assert alert.emitted_at is not None
