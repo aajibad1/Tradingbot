@@ -70,6 +70,16 @@ def test_balances_aggregate_per_asset_across_wallets(client):
     assert bal == {"USDC": "75.50000000", "NGN": "100000.00000000"}
 
 
+def test_balances_endpoint_also_stays_fixed_point_at_sub_micro_unit_magnitude(client):
+    """/v1/balances builds its response independently of _wallet_out — round 1
+    fixed str(Decimal)'s scientific-notation bug there but missed this sibling
+    path entirely. Caught by independent review, round 3."""
+    wid = _wallet(client, asset="USDC")["id"]
+    client.post(f"/v1/wallets/{wid}/adjust", json={"amount": "0.00000002"})
+    bal = client.get("/v1/balances", params={"tenant": "ten_1"}).json()["balances"]
+    assert bal == {"USDC": "0.00000002"}
+
+
 def test_list_wallets_filtered_by_tenant(client):
     _wallet(client, tenant="ten_1")
     _wallet(client, tenant="ten_2")

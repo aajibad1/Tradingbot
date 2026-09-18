@@ -161,4 +161,7 @@ def balances(tenant: str) -> dict[str, Any]:
     for w in _wallets.values():
         if w["tenant_id"] == tenant:
             by_asset[w["asset"]] = _quantize(by_asset.get(w["asset"], Decimal(0)) + w["balance"])
-    return {"tenant_id": tenant, "balances": {asset: str(amt) for asset, amt in by_asset.items()}}
+    # format(x, "f"), not str(x) — same reasoning as _wallet_out: Decimal's
+    # str() switches to scientific notation below 1e-6, which this endpoint
+    # missed when _wallet_out was fixed (caught by independent review, round 3).
+    return {"tenant_id": tenant, "balances": {asset: format(amt, "f") for asset, amt in by_asset.items()}}
