@@ -29,7 +29,7 @@ def _wallet(client, tenant="ten_1", asset="USDC"):
 def test_create_wallet_starts_at_zero(client):
     w = _wallet(client)
     assert w["id"].startswith("wlt_")
-    assert w["balance"] == "0"
+    assert w["balance"] == "0.00000000"
     assert w["asset"] == "USDC"
 
 
@@ -105,3 +105,47 @@ def test_balance_response_is_a_string_never_a_json_number(client):
     back to float on the wire — the exact regression this migration fixes."""
     w = _wallet(client)
     assert isinstance(w["balance"], str)
+
+
+def test_sub_micro_unit_balance_stays_fixed_point_not_scientific_notation(client):
+    """Decimal.__str__ switches to scientific notation below 1e-6 (e.g.
+    Decimal("0.00000002") -> "2E-8") — exactly the sub-micro-unit range a
+    stablecoin balance can legitimately sit in, and exactly what
+    _wallet_out's format(x, "f") exists to prevent. Caught by independent
+    review: str() passed every other test here because none used an amount
+    small enough to trigger it."""
+    wid = _wallet(client)["id"]
+    r = client.post(f"/v1/wallets/{wid}/adjust", json={"amount": "0.00000002"})
+    assert r.json()["balance"] == "0.00000002"
+    assert "E" not in r.json()["balance"] and "e" not in r.json()["balance"]
+
+
+def test_non_numeric_amount_returns_the_standard_error_envelope(client):
+    """A Pydantic validation failure (not a business-rule APIError) must
+    still come back as {"error": {code, message, ...}} per docs/06 — not
+    FastAPI's default {"detail": [...]}. Caught by independent review."""
+    wid = _wallet(client)["id"]
+    r = client.post(f"/v1/wallets/{wid}/adjust", json={"amount": "not-a-number"})
+    assert r.status_code == 422
+    body = r.json()
+    assert "error" in body and "detail" not in body
+    assert body["error"]["code"] == "validation_error"
+
+
+def test_float_rejection_also_uses_the_standard_error_envelope(client):
+    """Same envelope requirement for the amount-is-a-JSON-float rejection
+    specifically (the field_validator path), not just generic type errors."""
+    wid = _wallet(client)["id"]
+    r = client.post(f"/v1/wallets/{wid}/adjust", json={"amount": 99.1})
+    body = r.json()
+    assert "error" in body and "detail" not in body
+
+
+def test_absurdly_large_amount_is_a_clean_422_not_a_500(client):
+    """Decimal's default context precision (28 significant digits) is a real
+    ceiling — confirm it fails closed as invalid_amount, not an unhandled
+    InvalidOperation surfacing as a 500."""
+    wid = _wallet(client)["id"]
+    r = client.post(f"/v1/wallets/{wid}/adjust", json={"amount": "1e20"})
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "invalid_amount"

@@ -64,10 +64,16 @@ def _quantize(amount: Decimal) -> Decimal:
 
 
 def _wallet_out(w: dict) -> dict:
-    """Wire representation — balance as a string so FastAPI's default JSON
-    encoder (which casts Decimal -> float) can never silently reintroduce
-    the float-precision problem this migration removes."""
-    return {**w, "balance": str(w["balance"])}
+    """Wire representation — balance as a fixed-point string so FastAPI's
+    default JSON encoder (which casts Decimal -> float) can never silently
+    reintroduce the float-precision problem this migration removes.
+
+    format(x, "f") is required, not str(x): Decimal.__str__ switches to
+    scientific notation once the adjusted exponent is < -6 (e.g. Decimal
+    "0.00000002" -> "2E-8") — exactly the sub-micro-unit range a stablecoin
+    balance can legitimately sit in, and exactly the shape this migration
+    exists to keep fixed-point on the wire."""
+    return {**w, "balance": format(w["balance"], "f")}
 
 
 class WalletCreate(BaseModel):
@@ -102,7 +108,7 @@ def create_wallet(req: WalletCreate) -> dict[str, Any]:
     now = _now().isoformat()
     _wallets[wid] = {
         "id": wid, "tenant_id": req.tenant_id, "asset": req.asset.upper(),
-        "balance": Decimal(0), "created_at": now, "updated_at": now,
+        "balance": _quantize(Decimal(0)), "created_at": now, "updated_at": now,
     }
     return _wallet_out(_wallets[wid])
 
