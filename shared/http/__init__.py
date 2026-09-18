@@ -77,7 +77,22 @@ def install_contract(app, *, service_name: str):
         # that can't reach this path directly (it fires before a handler body
         # even runs) still gets the one contractual error shape instead of
         # FastAPI's default {"detail": [...]}.
-        err = APIError("validation_error", str(exc), http_status=422)
+        #
+        # Build the message from exc.errors()'s own type/loc/msg fields, NEVER
+        # str(exc): on the FastAPI/Pydantic versions this repo pins,
+        # RequestValidationError.__str__() appends the endpoint's absolute
+        # source file path, line number, and function name to the message —
+        # a real information-exposure bug (caught by independent review), not
+        # present in FastAPI's own default handler. ErrorBody.message is a
+        # plain str (not a structured field), so this stays a short summary
+        # rather than the full jsonable_encoder(exc.errors()) FastAPI's
+        # default {"detail": [...]} returns — extending the shared error
+        # envelope's shape is a bigger, separate change.
+        summary = "; ".join(
+            f"{'.'.join(str(p) for p in e.get('loc', ()))}: {e.get('msg', 'invalid')}"
+            for e in exc.errors()
+        ) or "request validation failed"
+        err = APIError("validation_error", summary, http_status=422)
         return JSONResponse(
             err.body(
                 request_id=get_request_id(request),

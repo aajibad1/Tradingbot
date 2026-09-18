@@ -137,8 +137,22 @@ def test_float_rejection_also_uses_the_standard_error_envelope(client):
     specifically (the field_validator path), not just generic type errors."""
     wid = _wallet(client)["id"]
     r = client.post(f"/v1/wallets/{wid}/adjust", json={"amount": 99.1})
+    assert r.status_code == 422
     body = r.json()
     assert "error" in body and "detail" not in body
+
+
+def test_validation_error_message_never_leaks_a_server_file_path(client):
+    """RequestValidationError.__str__() (the FastAPI/Pydantic versions this
+    repo pins) appends the endpoint's absolute source file path, line
+    number, and function name — shared/http's handler must build the
+    message from exc.errors(), never str(exc), or every 422 in every
+    install_contract service leaks its container's internal directory
+    layout. Caught by independent review; this is the regression guard."""
+    wid = _wallet(client)["id"]
+    r = client.post(f"/v1/wallets/{wid}/adjust", json={"amount": "not-a-number"})
+    message = r.json()["error"]["message"]
+    assert "/" not in message and ".py" not in message and "line " not in message
 
 
 def test_absurdly_large_amount_is_a_clean_422_not_a_500(client):
