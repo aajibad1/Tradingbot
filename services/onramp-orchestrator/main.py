@@ -193,7 +193,7 @@ def advance_order(order_id: str) -> Order:
     order = _get_order(order_id)
     if order.is_terminal():
         return order
-    if order.screening_check_id and order.status in _SCREENING_GATED_STATUSES:
+    if order.screening_check_id is not None and order.status in _SCREENING_GATED_STATUSES:
         if not _screening_is_clear(order.screening_check_id):
             if order.status != Status.AWAITING_REVIEW:
                 order.status = Status.AWAITING_REVIEW

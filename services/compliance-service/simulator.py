@@ -37,7 +37,12 @@ def next_kyc_status(current: str, outcome: str | None) -> str:
     if current == KycStatus.PENDING:
         return KycStatus.IN_REVIEW
     if current == KycStatus.IN_REVIEW:
-        resolved = outcome or KycStatus.APPROVED
+        # outcome is None only when the field is OMITTED — an explicit "" must
+        # not be conflated with omission and silently default to the happy
+        # path (this is a deterministic-simulator input-handling bug, not
+        # just style: an accidental empty string should fail loud like any
+        # other invalid outcome, not quietly resolve to APPROVED).
+        resolved = outcome if outcome is not None else KycStatus.APPROVED
         if resolved not in _KYC_TERMINAL_OUTCOMES:
             raise APIError(
                 "invalid_outcome",
@@ -54,7 +59,9 @@ def next_screening_verdict(current: str, outcome: str | None) -> str:
     """The next screening verdict, or the same verdict if already terminal."""
     if current in ScreeningVerdict.TERMINAL:
         return current
-    resolved = outcome or ScreeningVerdict.CLEAR
+    # Same reasoning as next_kyc_status: "" must fail loud, not silently
+    # resolve to the happy-path CLEAR verdict.
+    resolved = outcome if outcome is not None else ScreeningVerdict.CLEAR
     if resolved not in _SCREENING_TERMINAL_OUTCOMES:
         raise APIError(
             "invalid_outcome",

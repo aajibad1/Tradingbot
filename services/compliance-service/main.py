@@ -101,7 +101,7 @@ def _audit(*, event_type: str, action: str, resource_type: str, resource_id: str
                 resource_type=resource_type,
                 resource_id=resource_id,
                 metadata={status_field: status_value, "subject_id": subject_id,
-                          "subject_type": subject_type},
+                          "subject_type": subject_type, "tenant_id": tenant_id},
                 emitted_at=_now(),
             ),
             attributes={"source": PRODUCER, "event": event_type},

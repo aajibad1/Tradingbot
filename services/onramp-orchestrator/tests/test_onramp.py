@@ -156,6 +156,17 @@ def test_escalated_screening_routes_to_awaiting_review_not_processing(client, mo
     assert etypes == ["funding.created", "funding.awaiting_review"]
 
 
+def test_empty_string_screening_check_id_is_rejected_not_silently_none(client):
+    """A client that defaults an unset optional field to "" instead of
+    omitting it must not silently bypass the compliance gate — "" is not
+    "no screening requested", it's an invalid check id. Caught by
+    independent review: the gate used a truthiness check (`if
+    order.screening_check_id and ...`), so "" skipped it entirely and a
+    "screened" order could complete with zero compliance verification."""
+    r = client.post("/v1/onramp/orders", json=_order_with_screening(check_id=""))
+    assert r.status_code == 422
+
+
 def test_pending_screening_also_blocks_not_just_escalated(client, monkeypatch):
     """A still-pending (not yet resolved) screening check must block too —
     absence of a CLEAR verdict is never treated as clear."""

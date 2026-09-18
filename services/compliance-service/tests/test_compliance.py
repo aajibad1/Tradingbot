@@ -90,6 +90,15 @@ def test_kyc_check_not_found_404(client):
     assert r.status_code == 404 and r.json()["error"]["code"] == "kyc_check_not_found"
 
 
+def test_kyc_empty_string_outcome_rejected_not_treated_as_omitted(client):
+    """"" must not be conflated with an omitted field and silently default
+    to APPROVED (the happy path) — caught by independent review."""
+    cid = _kyc(client)["id"]
+    client.post(f"/v1/kyc/checks/{cid}/advance", json={})
+    r = client.post(f"/v1/kyc/checks/{cid}/advance", json={"outcome": ""})
+    assert r.status_code == 422 and r.json()["error"]["code"] == "invalid_outcome"
+
+
 def test_kyc_invalid_subject_type_rejected(client):
     r = client.post("/v1/kyc/checks", json={"subject_id": "x", "subject_type": "robot"})
     assert r.status_code == 422 and r.json()["error"]["code"] == "invalid_subject_type"
@@ -132,6 +141,14 @@ def test_screening_terminal_check_is_idempotent(client):
 def test_screening_invalid_outcome_rejected(client):
     cid = _screening(client)["id"]
     r = client.post(f"/v1/screening/checks/{cid}/advance", json={"outcome": "maybe"})
+    assert r.status_code == 422 and r.json()["error"]["code"] == "invalid_outcome"
+
+
+def test_screening_empty_string_outcome_rejected_not_treated_as_omitted(client):
+    """Same finding as KYC's equivalent test — "" silently resolved to CLEAR
+    (the happy path) instead of failing loud. Caught by independent review."""
+    cid = _screening(client)["id"]
+    r = client.post(f"/v1/screening/checks/{cid}/advance", json={"outcome": ""})
     assert r.status_code == 422 and r.json()["error"]["code"] == "invalid_outcome"
 
 
@@ -198,6 +215,18 @@ def test_every_screening_transition_is_audited(client):
     topics_and_types = [(t, e.event_type) for t, e in client.captured.events]
     assert (Topic.AUDIT_LOG, "screening.check_created") in topics_and_types
     assert (Topic.AUDIT_LOG, "screening.escalated") in topics_and_types
+
+
+def test_audit_metadata_carries_tenant_id(client):
+    """A multi-tenant compliance audit trail is useless if it can't be
+    attributed to a tenant. AuditLogEntry has no dedicated tenant_id column
+    (shared.models.AuditLogEntry), so it must land in metadata — caught by
+    independent review: the field was accepted as a parameter and silently
+    dropped, never written anywhere, for every KYC/screening event."""
+    client.post("/v1/kyc/checks", json={"subject_id": "org_1", "subject_type": "organization",
+                                         "tenant_id": "ten_42"})
+    topic, entry = client.captured.events[0]
+    assert entry.metadata["tenant_id"] == "ten_42"
 
 
 def test_audit_failure_does_not_block_the_transition(client, monkeypatch):

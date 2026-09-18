@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from shared.http import Status
 
@@ -49,6 +49,18 @@ class OrderRequest(BaseModel):
                     "Omitted entirely: no compliance gate, unchanged from before "
                     "this field existed.",
     )
+
+    @field_validator("screening_check_id")
+    @classmethod
+    def _reject_empty_screening_check_id(cls, v: str | None) -> str | None:
+        # An empty string is not "omitted" — advance_order()'s gate is keyed
+        # on `is not None`, so "" would otherwise silently skip the fail-closed
+        # compliance check entirely (a real client-input shape: some frameworks
+        # default an unset optional field to "" rather than sending null/omitting
+        # it). Reject it here rather than trust every downstream truthiness check.
+        if v is not None and v == "":
+            raise ValueError("screening_check_id must not be empty — omit the field entirely to skip screening")
+        return v
 
 
 class Order(BaseModel):
