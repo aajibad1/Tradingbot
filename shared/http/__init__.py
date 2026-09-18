@@ -8,8 +8,15 @@ One import wires a FastAPI service into the platform contract:
 
 That installs:
   - correlation middleware (x-request-id / x-correlation-id propagate + echo), and
-  - exception handlers that render APIError — and any uncaught error — into the
-    standard ``{"error": {code, message, request_id, correlation_id}}`` body.
+  - exception handlers that render APIError, a request-body/query validation
+    failure, and any uncaught error — into the standard
+    ``{"error": {code, message, request_id, correlation_id}}`` body.
+
+A service that raises ``fastapi.HTTPException`` directly (several already do, for
+business-rule 422s predating this contract) keeps FastAPI's own
+``{"detail": ...}`` shape — that call site owns the choice to migrate to
+``APIError``, this layer only fixes the *automatic* Pydantic validation-error
+path, which no call site controls.
 
 Idempotency is a building block (``IdempotencyStore`` + ``idempotency_key``) rather
 than auto-wired, because key scoping is per-endpoint — see shared/http/idempotency.py.
@@ -49,6 +56,8 @@ def install_contract(app, *, service_name: str):
     from starlette.requests import Request
     from starlette.responses import JSONResponse
 
+    from fastapi.exceptions import RequestValidationError
+
     app.add_middleware(CorrelationMiddleware)
 
     @app.exception_handler(APIError)
@@ -59,6 +68,37 @@ def install_contract(app, *, service_name: str):
                 correlation_id=get_correlation_id(request),
             ),
             status_code=exc.http_status,
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def _handle_validation_error(request: Request, exc: RequestValidationError):  # noqa: ANN202
+        # A request body/query that fails Pydantic validation (malformed JSON,
+        # wrong type, a model's own field_validator raising) — every call site
+        # that can't reach this path directly (it fires before a handler body
+        # even runs) still gets the one contractual error shape instead of
+        # FastAPI's default {"detail": [...]}.
+        #
+        # Build the message from exc.errors()'s own type/loc/msg fields, NEVER
+        # str(exc): on the FastAPI/Pydantic versions this repo pins,
+        # RequestValidationError.__str__() appends the endpoint's absolute
+        # source file path, line number, and function name to the message —
+        # a real information-exposure bug (caught by independent review), not
+        # present in FastAPI's own default handler. ErrorBody.message is a
+        # plain str (not a structured field), so this stays a short summary
+        # rather than the full jsonable_encoder(exc.errors()) FastAPI's
+        # default {"detail": [...]} returns — extending the shared error
+        # envelope's shape is a bigger, separate change.
+        summary = "; ".join(
+            f"{'.'.join(str(p) for p in e.get('loc', ()))}: {e.get('msg', 'invalid')}"
+            for e in exc.errors()
+        ) or "request validation failed"
+        err = APIError("validation_error", summary, http_status=422)
+        return JSONResponse(
+            err.body(
+                request_id=get_request_id(request),
+                correlation_id=get_correlation_id(request),
+            ),
+            status_code=422,
         )
 
     @app.exception_handler(Exception)
