@@ -351,6 +351,9 @@ locals {
     "approval-gate-service" = { secrets = [], publish_topics = ["arb-audit-log"], subscribe_subs = [], cpu_idle = true }
     "settlement-status"     = { secrets = [], publish_topics = [], subscribe_subs = ["funding-events-settlement", "payout-events-settlement"], cpu_idle = true }
     "webhook-service"       = { secrets = [], publish_topics = [], subscribe_subs = ["funding-events-webhook", "payout-events-webhook"], cpu_idle = true }
+    # KYC/KYB + sanctions/PEP screening sandbox adapters (issue #22). Publishes
+    # AuditLogEntry to Topic.AUDIT_LOG on every check transition (docs/adr/0008).
+    "compliance-service" = { secrets = [], publish_topics = ["arb-audit-log"], subscribe_subs = [], cpu_idle = true }
   }
 
   # Flat list of every distinct secret ID used anywhere in the system.
