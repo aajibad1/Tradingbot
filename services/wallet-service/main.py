@@ -5,9 +5,14 @@ balance adjusted by credits/debits (e.g. an on-ramp completion credits stablecoi
 a payout debits it). Debits are overdraft-protected. Read endpoints surface wallets
 and aggregated balances; mutation is via an internal adjust endpoint.
 
-SANDBOX: balances are an in-memory ledger (single-instance). Production would back
-this with the double-entry accounts-service / Cloud SQL and real custody. Money
-amounts are float rounded for the sandbox; production uses Decimal.
+SANDBOX: balances are an in-memory ledger (single-instance) — production would back
+this with the double-entry accounts-service / Cloud SQL and real custody (see
+docs/adr/0004-money-representation.md "Consequences": two independent balance
+representations exist for one concern; this service is not yet the double-entry
+authority accounts-service is). Money is Decimal, on the wire AND internally —
+docs/adr/0004 is explicit that float is never acceptable for money, sandbox or
+not. Decimal round-trips through FastAPI's default JSON encoder as a float
+(precision-losing), so every response serializes balances as strings.
 
 Endpoints (docs/06):
   GET  /healthz
@@ -23,10 +28,11 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
+from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation
 from typing import Any
 
 from fastapi import FastAPI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from shared.http import APIError, install_contract
 
@@ -35,7 +41,13 @@ logger = logging.getLogger("wallet-service")
 
 PRODUCER = "wallet-service"
 
-# wallet_id -> wallet dict (in-memory sandbox ledger).
+# 8 decimal places — matches the precision every other Decimal-money path in
+# this repo uses (accounts-service's Numeric(38, 8)). Banker's rounding
+# (ROUND_HALF_EVEN) avoids the small systematic upward bias round-half-up
+# would introduce over many postings.
+_QUANT = Decimal("0.00000001")
+
+# wallet_id -> wallet dict (in-memory sandbox ledger). "balance" is Decimal.
 _wallets: dict[str, dict] = {}
 
 
@@ -47,8 +59,15 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _round(x: float) -> float:
-    return round(x + 1e-12, 8)
+def _quantize(amount: Decimal) -> Decimal:
+    return amount.quantize(_QUANT, rounding=ROUND_HALF_EVEN)
+
+
+def _wallet_out(w: dict) -> dict:
+    """Wire representation — balance as a string so FastAPI's default JSON
+    encoder (which casts Decimal -> float) can never silently reintroduce
+    the float-precision problem this migration removes."""
+    return {**w, "balance": str(w["balance"])}
 
 
 class WalletCreate(BaseModel):
@@ -57,8 +76,19 @@ class WalletCreate(BaseModel):
 
 
 class Adjust(BaseModel):
-    amount: float = Field(description="Positive = credit, negative = debit")
+    amount: Decimal = Field(description="Positive = credit, negative = debit")
     reason: str = Field(default="", description="Audit reason, e.g. 'funding ord_123 completed'")
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _reject_float_input(cls, v: object) -> object:
+        # A JSON number like 99.1 arrives as a Python float before Pydantic
+        # converts it — by then the precision loss already happened. Accept
+        # only int/str/Decimal on the wire; float is exactly the mistake
+        # this migration exists to close off, including at the request body.
+        if isinstance(v, float):
+            raise ValueError("amount must be sent as a string or integer, not a JSON float")
+        return v
 
 
 @app.get("/healthz")
@@ -72,14 +102,14 @@ def create_wallet(req: WalletCreate) -> dict[str, Any]:
     now = _now().isoformat()
     _wallets[wid] = {
         "id": wid, "tenant_id": req.tenant_id, "asset": req.asset.upper(),
-        "balance": 0.0, "created_at": now, "updated_at": now,
+        "balance": Decimal(0), "created_at": now, "updated_at": now,
     }
-    return _wallets[wid]
+    return _wallet_out(_wallets[wid])
 
 
 @app.get("/v1/wallets")
 def list_wallets(tenant: str | None = None) -> dict[str, Any]:
-    out = [w for w in _wallets.values() if tenant is None or w["tenant_id"] == tenant]
+    out = [_wallet_out(w) for w in _wallets.values() if tenant is None or w["tenant_id"] == tenant]
     return {"wallets": out, "count": len(out)}
 
 
@@ -92,7 +122,7 @@ def _get_wallet(wallet_id: str) -> dict[str, Any]:
 
 @app.get("/v1/wallets/{wallet_id}")
 def get_wallet(wallet_id: str) -> dict[str, Any]:
-    return _get_wallet(wallet_id)
+    return _wallet_out(_get_wallet(wallet_id))
 
 
 @app.post("/v1/wallets/{wallet_id}/adjust")
@@ -100,7 +130,10 @@ def adjust(wallet_id: str, req: Adjust) -> dict[str, Any]:
     w = _get_wallet(wallet_id)
     if req.amount == 0:
         raise APIError("invalid_amount", "amount must be non-zero", http_status=422)
-    new_balance = _round(w["balance"] + req.amount)
+    try:
+        new_balance = _quantize(w["balance"] + req.amount)
+    except InvalidOperation as exc:
+        raise APIError("invalid_amount", f"amount could not be applied: {exc}", http_status=422) from exc
     if new_balance < 0:
         raise APIError(
             "insufficient_funds",
@@ -112,14 +145,14 @@ def adjust(wallet_id: str, req: Adjust) -> dict[str, Any]:
     _wallets[wallet_id] = w
     logger.info("wallet %s %+.8f %s → %.8f (%s)", wallet_id, req.amount, w["asset"],
                 new_balance, req.reason)
-    return w
+    return _wallet_out(w)
 
 
 @app.get("/v1/balances")
 def balances(tenant: str) -> dict[str, Any]:
     """Aggregate balances per asset across a tenant's wallets."""
-    by_asset: dict[str, float] = {}
+    by_asset: dict[str, Decimal] = {}
     for w in _wallets.values():
         if w["tenant_id"] == tenant:
-            by_asset[w["asset"]] = _round(by_asset.get(w["asset"], 0.0) + w["balance"])
-    return {"tenant_id": tenant, "balances": by_asset}
+            by_asset[w["asset"]] = _quantize(by_asset.get(w["asset"], Decimal(0)) + w["balance"])
+    return {"tenant_id": tenant, "balances": {asset: str(amt) for asset, amt in by_asset.items()}}
