@@ -74,6 +74,7 @@ CORRIDOR_INTEL="$(url_of corridor-intelligence-service)"
 FX_RATE="$(url_of fx-rate-service)"
 TRADE_LEDGER="$(url_of trade-ledger)"
 DEBATE="$(url_of debate-service)"
+COMPLIANCE="$(url_of compliance-service)"
 
 for pair in "partner-auth:$PARTNER_AUTH" "api-metering:$METERING" "gateway:$GATEWAY"; do
   [[ -n "${pair#*:}" ]] || die "could not resolve URL for ${pair%%:*} — is it deployed?"
@@ -102,6 +103,14 @@ update venue-anomaly-detector "CONNECTOR_RUNTIME_URL=$CONNECTOR_RUNTIME"
 update ai-ops-agent "APPROVAL_GATE_URL=$APPROVAL_GATE"
 update corridor-engine "CORRIDOR_INTEL_URL=$CORRIDOR_INTEL,FX_RATE_SERVICE_URL=$FX_RATE"
 update route-optimizer "TRADE_LEDGER_URL=$TRADE_LEDGER"
+
+# COMPLIANCE_SERVICE_URL is the one exception to "fail-soft on the consuming
+# side" above: onramp-orchestrator's screening gate (issue #22) fails CLOSED —
+# an order created with a screening_check_id but no reachable compliance-service
+# is treated as unverifiable and blocked, not silently allowed through. Leaving
+# this unset is safe (the gate only activates per-order, opt-in) but means any
+# order that DOES request screening will sit in awaiting_review forever.
+update onramp-orchestrator "COMPLIANCE_SERVICE_URL=$COMPLIANCE"
 # Explicit pin, not capability discovery — A2A_DISCOVER_DEBATE's find_agents_with_skill
 # would itself need every other peer's URL resolvable first; the explicit env always
 # wins anyway (see corridor-intelligence-service/main.py:_resolve_debate_base).

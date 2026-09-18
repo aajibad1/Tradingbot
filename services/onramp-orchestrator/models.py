@@ -39,11 +39,21 @@ class OrderRequest(BaseModel):
     destination_wallet: str = Field(description="Where the stablecoin is delivered")
     quote_id: str | None = Field(default=None, description="Optional prior quote to honor")
     corridor: str | None = None
+    screening_check_id: str | None = Field(
+        default=None,
+        description="Optional compliance-service screening check id (issue #22). "
+                    "When set, advance() gates PENDING -> PROCESSING on that "
+                    "check's verdict being 'clear' — fail-closed: an escalated, "
+                    "still-pending, or unverifiable check routes the order to "
+                    "awaiting_review instead of proceeding to provider submission. "
+                    "Omitted entirely: no compliance gate, unchanged from before "
+                    "this field existed.",
+    )
 
 
 class Order(BaseModel):
     id: str
-    status: str = Field(description="One of shared.http.Status (pending→processing→completed/failed)")
+    status: str = Field(description="One of shared.http.Status (pending→[awaiting_review]→processing→completed/failed)")
     source_currency: str
     dest_asset: str
     amount: float
@@ -52,6 +62,7 @@ class Order(BaseModel):
     destination_wallet: str
     tenant_id: str | None = None
     correlation_id: str
+    screening_check_id: str | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -18,6 +18,13 @@ Endpoints (docs/06):
   GET  /v1/onramp/orders/{id}
   POST /v1/onramp/orders/{id}/advance    (sandbox lifecycle step; cron-ping)
 
+Config (env):
+  COMPLIANCE_SERVICE_URL — opt-in per-order: only consulted when the order was
+  created with a screening_check_id (issue #22). Unlike this repo's other
+  cross-service enrichments (fail-soft/advisory), this is a compliance gate and
+  fails CLOSED — an escalated, still-pending, or unverifiable screening check
+  routes the order to awaiting_review instead of provider submission.
+
 Order/idempotency state is in-memory (single-instance sandbox). Production would
 back both with Redis (shared.http.RedisIdempotencyStore) — noted, not wired.
 """
@@ -25,9 +32,11 @@ back both with Redis (shared.http.RedisIdempotencyStore) — noted, not wired.
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 
+import httpx
 from fastapi import FastAPI, Request
 
 import sandbox_provider as sandbox
@@ -120,6 +129,7 @@ def create_order(req: OrderRequest, request: Request) -> Order:
         destination_wallet=req.destination_wallet,
         tenant_id=request.headers.get("x-tenant-id"),
         correlation_id=get_correlation_id(request) or _new_id("corr"),
+        screening_check_id=req.screening_check_id,
         created_at=now,
         updated_at=now,
     )
@@ -144,15 +154,57 @@ def get_order(order_id: str) -> Order:
     return _get_order(order_id)
 
 
+_SCREENING_GATED_STATUSES = frozenset({Status.PENDING, Status.AWAITING_REVIEW})
+
+
+def _screening_is_clear(check_id: str) -> bool:
+    """True only if compliance-service reports this screening check as
+    verdict='clear'. Fails CLOSED on every other outcome — no
+    COMPLIANCE_SERVICE_URL configured, the service unreachable, a non-200,
+    a malformed body, or a verdict of 'pending'/'escalated' — because
+    "couldn't verify" must never be treated as "clear" for a compliance gate
+    (contrast with the opportunity-ranker/venue-anomaly-detector style
+    enrichments elsewhere in this repo, which are advisory and fail-soft)."""
+    base = os.environ.get("COMPLIANCE_SERVICE_URL")
+    if not base:
+        logger.warning("screening check %s requested but COMPLIANCE_SERVICE_URL "
+                        "unset (fail-closed, blocking)", check_id)
+        return False
+    try:
+        r = httpx.get(f"{base.rstrip('/')}/v1/screening/checks/{check_id}", timeout=3.0)
+        r.raise_for_status()
+        return r.json().get("verdict") == "clear"
+    except Exception:  # noqa: BLE001 — any failure fails closed, never silently proceeds
+        logger.warning("screening check %s unverifiable (fail-closed, blocking)", check_id)
+        return False
+
+
 @app.post("/v1/onramp/orders/{order_id}/advance", response_model=Order)
 def advance_order(order_id: str) -> Order:
     """Advance the sandbox order one lifecycle step and emit the funding event.
 
-    pending → processing (funding.processing) → completed (funding.completed).
-    A terminal order is returned unchanged (idempotent)."""
+    pending → [awaiting_review] → processing (funding.processing) → completed
+    (funding.completed). A terminal order is returned unchanged (idempotent).
+
+    Compliance gate (issue #22): an order created with screening_check_id
+    only leaves pending/awaiting_review once that check is verdict='clear' —
+    every other outcome routes to (or holds at) awaiting_review instead of
+    provider submission ("no provider execution occurs")."""
     order = _get_order(order_id)
     if order.is_terminal():
         return order
+    if order.screening_check_id and order.status in _SCREENING_GATED_STATUSES:
+        if not _screening_is_clear(order.screening_check_id):
+            if order.status != Status.AWAITING_REVIEW:
+                order.status = Status.AWAITING_REVIEW
+                order.updated_at = _now()
+                _orders[order_id] = order
+                _emit("funding.awaiting_review", order)
+            return order
+        # Screening is clear — proceed as the pending -> processing step,
+        # regardless of whether we arrived here from pending directly or
+        # recovered from a prior awaiting_review.
+        order.status = Status.PENDING
     new_status = sandbox.next_status(order.status)
     order.status = new_status
     order.updated_at = _now()

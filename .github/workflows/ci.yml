@@ -117,6 +117,7 @@ jobs:
           - admin-console
           - routing-service
           - wallet-service
+          - compliance-service
           - onramp-orchestrator
           - offramp-orchestrator
           - settlement-status
@@ -187,6 +188,7 @@ jobs:
           - admin-console
           - routing-service
           - wallet-service
+          - compliance-service
           - onramp-orchestrator
           - offramp-orchestrator
           - settlement-status
@@ -324,6 +326,7 @@ jobs:
           - admin-console
           - routing-service
           - wallet-service
+          - compliance-service
           - onramp-orchestrator
           - offramp-orchestrator
           - settlement-status
