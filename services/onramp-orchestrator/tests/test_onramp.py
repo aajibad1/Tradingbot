@@ -231,6 +231,148 @@ def test_awaiting_review_holds_if_still_not_clear(client, monkeypatch):
     assert etypes.count("funding.awaiting_review") == 1
 
 
+# --- payment approval gate (issue #21) --------------------------------------- #
+
+
+class _ApprovalResp:
+    def __init__(self, status, status_code=200):
+        self._status = status
+        self.status_code = status_code
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise Exception(f"HTTP {self.status_code}")
+
+    def json(self):
+        return {"status": self._status}
+
+
+def _order_with_approval(request_id="apr_1"):
+    body = _order_body()
+    body["approval_request_id"] = request_id
+    return body
+
+
+def test_order_without_approval_request_id_is_unaffected(client):
+    """No approval_request_id -> the gate never activates, even with no
+    PAYMENT_APPROVAL_SERVICE_URL configured — existing behavior unchanged."""
+    oid = client.post("/v1/onramp/orders", json=_order_body()).json()["id"]
+    assert client.post(f"/v1/onramp/orders/{oid}/advance").json()["status"] == Status.PROCESSING
+
+
+def test_approved_request_allows_advance_straight_through(client, monkeypatch):
+    monkeypatch.setenv("PAYMENT_APPROVAL_SERVICE_URL", "http://payment-approval")
+    monkeypatch.setattr(main.httpx, "get", lambda url, timeout=None: _ApprovalResp("approved"))
+    oid = client.post("/v1/onramp/orders", json=_order_with_approval()).json()["id"]
+    r = client.post(f"/v1/onramp/orders/{oid}/advance")
+    assert r.json()["status"] == Status.PROCESSING
+
+
+def test_pending_approval_routes_to_awaiting_review_not_processing(client, monkeypatch):
+    """The literal acceptance criterion: an order cannot reach provider
+    submission without a recorded approval."""
+    monkeypatch.setenv("PAYMENT_APPROVAL_SERVICE_URL", "http://payment-approval")
+    monkeypatch.setattr(main.httpx, "get", lambda url, timeout=None: _ApprovalResp("pending"))
+    oid = client.post("/v1/onramp/orders", json=_order_with_approval()).json()["id"]
+    r = client.post(f"/v1/onramp/orders/{oid}/advance")
+    assert r.json()["status"] == Status.AWAITING_REVIEW
+    etypes = [e[1] for e in client.captured.events]
+    assert etypes == ["funding.created", "funding.awaiting_review"]
+
+
+def test_rejected_approval_blocks_advance(client, monkeypatch):
+    monkeypatch.setenv("PAYMENT_APPROVAL_SERVICE_URL", "http://payment-approval")
+    monkeypatch.setattr(main.httpx, "get", lambda url, timeout=None: _ApprovalResp("rejected"))
+    oid = client.post("/v1/onramp/orders", json=_order_with_approval()).json()["id"]
+    r = client.post(f"/v1/onramp/orders/{oid}/advance")
+    assert r.json()["status"] == Status.AWAITING_REVIEW
+
+
+def test_empty_string_approval_request_id_is_rejected_not_silently_none(client):
+    """Same lesson as screening_check_id (issue #22 review finding): "" must
+    not silently skip the fail-closed approval gate."""
+    r = client.post("/v1/onramp/orders", json=_order_with_approval(request_id=""))
+    assert r.status_code == 422
+
+
+def test_payment_approval_service_unreachable_fails_closed(client, monkeypatch):
+    monkeypatch.delenv("PAYMENT_APPROVAL_SERVICE_URL", raising=False)
+    oid = client.post("/v1/onramp/orders", json=_order_with_approval()).json()["id"]
+    r = client.post(f"/v1/onramp/orders/{oid}/advance")
+    assert r.json()["status"] == Status.AWAITING_REVIEW
+
+
+def test_payment_approval_service_error_response_fails_closed(client, monkeypatch):
+    monkeypatch.setenv("PAYMENT_APPROVAL_SERVICE_URL", "http://payment-approval")
+    monkeypatch.setattr(main.httpx, "get", lambda url, timeout=None: _ApprovalResp("approved", status_code=500))
+    oid = client.post("/v1/onramp/orders", json=_order_with_approval()).json()["id"]
+    r = client.post(f"/v1/onramp/orders/{oid}/advance")
+    assert r.json()["status"] == Status.AWAITING_REVIEW
+
+
+def test_payment_approval_service_network_error_fails_closed(client, monkeypatch):
+    def _raise(url, timeout=None):
+        raise ConnectionError("unreachable")
+    monkeypatch.setenv("PAYMENT_APPROVAL_SERVICE_URL", "http://payment-approval")
+    monkeypatch.setattr(main.httpx, "get", _raise)
+    oid = client.post("/v1/onramp/orders", json=_order_with_approval()).json()["id"]
+    r = client.post(f"/v1/onramp/orders/{oid}/advance")
+    assert r.json()["status"] == Status.AWAITING_REVIEW
+
+
+def test_awaiting_review_recovers_once_approval_lands(client, monkeypatch):
+    monkeypatch.setenv("PAYMENT_APPROVAL_SERVICE_URL", "http://payment-approval")
+    monkeypatch.setattr(main.httpx, "get", lambda url, timeout=None: _ApprovalResp("pending"))
+    oid = client.post("/v1/onramp/orders", json=_order_with_approval()).json()["id"]
+    blocked = client.post(f"/v1/onramp/orders/{oid}/advance").json()
+    assert blocked["status"] == Status.AWAITING_REVIEW
+
+    monkeypatch.setattr(main.httpx, "get", lambda url, timeout=None: _ApprovalResp("approved"))
+    recovered = client.post(f"/v1/onramp/orders/{oid}/advance").json()
+    assert recovered["status"] == Status.PROCESSING
+
+
+# --- both gates set (issue #21 + #22 combined) -------------------------------- #
+
+
+def test_both_gates_set_requires_both_clear(client, monkeypatch):
+    """screening_check_id and approval_request_id are independent — both
+    may be set on the same order, and both must clear before it proceeds."""
+    monkeypatch.setenv("COMPLIANCE_SERVICE_URL", "http://compliance")
+    monkeypatch.setenv("PAYMENT_APPROVAL_SERVICE_URL", "http://payment-approval")
+
+    def _get(url, timeout=None):
+        if "screening" in url:
+            return _ScreeningResp("clear")
+        return _ApprovalResp("pending")
+    monkeypatch.setattr(main.httpx, "get", _get)
+
+    body = _order_body()
+    body["screening_check_id"] = "scr_1"
+    body["approval_request_id"] = "apr_1"
+    oid = client.post("/v1/onramp/orders", json=body).json()["id"]
+    r = client.post(f"/v1/onramp/orders/{oid}/advance")
+    assert r.json()["status"] == Status.AWAITING_REVIEW  # screening clear, but approval still pending
+
+
+def test_both_gates_set_and_both_clear_proceeds(client, monkeypatch):
+    monkeypatch.setenv("COMPLIANCE_SERVICE_URL", "http://compliance")
+    monkeypatch.setenv("PAYMENT_APPROVAL_SERVICE_URL", "http://payment-approval")
+
+    def _get(url, timeout=None):
+        if "screening" in url:
+            return _ScreeningResp("clear")
+        return _ApprovalResp("approved")
+    monkeypatch.setattr(main.httpx, "get", _get)
+
+    body = _order_body()
+    body["screening_check_id"] = "scr_1"
+    body["approval_request_id"] = "apr_1"
+    oid = client.post("/v1/onramp/orders", json=body).json()["id"]
+    r = client.post(f"/v1/onramp/orders/{oid}/advance")
+    assert r.json()["status"] == Status.PROCESSING
+
+
 def test_get_missing_order_is_404_error_envelope(client):
     r = client.get("/v1/onramp/orders/ord_nope")
     assert r.status_code == 404

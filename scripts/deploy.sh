@@ -46,7 +46,7 @@ ALL_SERVICES=(
   partner-auth public-api-gateway routing-service wallet-service api-metering connector-runtime
   approval-gate-service agent-registry agent-evals developer-portal admin-console
   onramp-orchestrator offramp-orchestrator settlement-status webhook-service tenant-billing
-  compliance-service
+  compliance-service payment-approval-service
 )
 
 # ── flags ─────────────────────────────────────────────────────────────────────

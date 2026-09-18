@@ -50,6 +50,17 @@ class OrderRequest(BaseModel):
                     "this field existed.",
     )
 
+    approval_request_id: str | None = Field(
+        default=None,
+        description="Optional payment-approval-service request id (issue #21). "
+                    "When set, advance() gates PENDING -> PROCESSING on that "
+                    "request's status being 'approved' — fail-closed, same "
+                    "posture as screening_check_id: pending/rejected/expired/ "
+                    "unverifiable routes to awaiting_review instead of "
+                    "provider submission. Independent of screening_check_id — "
+                    "both may be set, both must clear.",
+    )
+
     @field_validator("screening_check_id")
     @classmethod
     def _reject_empty_screening_check_id(cls, v: str | None) -> str | None:
@@ -60,6 +71,13 @@ class OrderRequest(BaseModel):
         # it). Reject it here rather than trust every downstream truthiness check.
         if v is not None and v == "":
             raise ValueError("screening_check_id must not be empty — omit the field entirely to skip screening")
+        return v
+
+    @field_validator("approval_request_id")
+    @classmethod
+    def _reject_empty_approval_request_id(cls, v: str | None) -> str | None:
+        if v is not None and v == "":
+            raise ValueError("approval_request_id must not be empty — omit the field entirely to skip the approval gate")
         return v
 
 
@@ -75,6 +93,7 @@ class Order(BaseModel):
     tenant_id: str | None = None
     correlation_id: str
     screening_check_id: str | None = None
+    approval_request_id: str | None = None
     created_at: datetime
     updated_at: datetime
 
