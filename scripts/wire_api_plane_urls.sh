@@ -75,6 +75,7 @@ FX_RATE="$(url_of fx-rate-service)"
 TRADE_LEDGER="$(url_of trade-ledger)"
 DEBATE="$(url_of debate-service)"
 COMPLIANCE="$(url_of compliance-service)"
+PAYMENT_APPROVAL="$(url_of payment-approval-service)"
 
 for pair in "partner-auth:$PARTNER_AUTH" "api-metering:$METERING" "gateway:$GATEWAY"; do
   [[ -n "${pair#*:}" ]] || die "could not resolve URL for ${pair%%:*} — is it deployed?"
@@ -111,6 +112,10 @@ update route-optimizer "TRADE_LEDGER_URL=$TRADE_LEDGER"
 # this unset is safe (the gate only activates per-order, opt-in) but means any
 # order that DOES request screening will sit in awaiting_review forever.
 update onramp-orchestrator "COMPLIANCE_SERVICE_URL=$COMPLIANCE"
+# Same fail-closed posture, independent gate (issue #21): an order created
+# with an approval_request_id but no reachable payment-approval-service is
+# treated as unverifiable and blocked, not silently allowed through.
+update onramp-orchestrator "PAYMENT_APPROVAL_SERVICE_URL=$PAYMENT_APPROVAL"
 # Explicit pin, not capability discovery — A2A_DISCOVER_DEBATE's find_agents_with_skill
 # would itself need every other peer's URL resolvable first; the explicit env always
 # wins anyway (see corridor-intelligence-service/main.py:_resolve_debate_base).

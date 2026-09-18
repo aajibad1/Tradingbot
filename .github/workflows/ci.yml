@@ -118,6 +118,7 @@ jobs:
           - routing-service
           - wallet-service
           - compliance-service
+          - payment-approval-service
           - onramp-orchestrator
           - offramp-orchestrator
           - settlement-status
@@ -189,6 +190,7 @@ jobs:
           - routing-service
           - wallet-service
           - compliance-service
+          - payment-approval-service
           - onramp-orchestrator
           - offramp-orchestrator
           - settlement-status
@@ -327,6 +329,7 @@ jobs:
           - routing-service
           - wallet-service
           - compliance-service
+          - payment-approval-service
           - onramp-orchestrator
           - offramp-orchestrator
           - settlement-status

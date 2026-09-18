@@ -29,7 +29,7 @@ PIDS=()
 AUTH=${AUTH:-8311} METER=${METER:-8312} ROUTE=${ROUTE:-8313} WALLET=${WALLET:-8314}
 ONRAMP=${ONRAMP:-8315} OFFRAMP=${OFFRAMP:-8316} SETTLE=${SETTLE:-8317} HOOK=${HOOK:-8318}
 BILL=${BILL:-8319} GW=${GW:-8320} STATUS=${STATUS:-8321} PORTAL=${PORTAL:-8322} ADMIN=${ADMIN:-8323}
-COMPLIANCE=${COMPLIANCE:-8324}
+COMPLIANCE=${COMPLIANCE:-8324} PAY_APPROVAL=${PAY_APPROVAL:-8325}
 # A2A governance/intelligence agents — default ports match shared/a2a/registry.py so
 # discovery (roster_catalog) resolves them; powers the portal/admin "Agents" panels.
 DEBATE=${DEBATE:-8340} GATE=${GATE:-8341} REG=${REG:-8342} EVALS=${EVALS:-8343} OPS=${OPS:-8344}
@@ -72,8 +72,10 @@ start partner-auth        "$AUTH"
 start api-metering        "$METER"
 start routing-service     "$ROUTE"
 start wallet-service      "$WALLET"
-start compliance-service  "$COMPLIANCE"
-start onramp-orchestrator "$ONRAMP" COMPLIANCE_SERVICE_URL="$L:$COMPLIANCE"
+start compliance-service       "$COMPLIANCE"
+start payment-approval-service "$PAY_APPROVAL"
+start onramp-orchestrator "$ONRAMP" \
+  COMPLIANCE_SERVICE_URL="$L:$COMPLIANCE" PAYMENT_APPROVAL_SERVICE_URL="$L:$PAY_APPROVAL"
 start offramp-orchestrator "$OFFRAMP"
 start settlement-status   "$SETTLE"
 start webhook-service     "$HOOK"
@@ -103,6 +105,7 @@ start admin-console       "$ADMIN" \
 note "Waiting for health"
 for nv in "partner-auth $AUTH" "api-metering $METER" "routing-service $ROUTE" \
           "wallet-service $WALLET" "compliance-service $COMPLIANCE" \
+          "payment-approval-service $PAY_APPROVAL" \
           "onramp-orchestrator $ONRAMP" "offramp-orchestrator $OFFRAMP" \
           "settlement-status $SETTLE" "webhook-service $HOOK" "tenant-billing $BILL" \
           "public-api-gateway $GW" \

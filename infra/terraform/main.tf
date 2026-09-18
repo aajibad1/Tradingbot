@@ -354,6 +354,10 @@ locals {
     # KYC/KYB + sanctions/PEP screening sandbox adapters (issue #22). Publishes
     # AuditLogEntry to Topic.AUDIT_LOG on every check transition (docs/adr/0008).
     "compliance-service" = { secrets = [], publish_topics = ["arb-audit-log"], subscribe_subs = [], cpu_idle = true }
+    # Segregation-of-duties payment approval workflow (issue #21). Publishes
+    # AuditLogEntry to Topic.AUDIT_LOG on every decision, approved or denied
+    # (docs/adr/0009).
+    "payment-approval-service" = { secrets = [], publish_topics = ["arb-audit-log"], subscribe_subs = [], cpu_idle = true }
   }
 
   # Flat list of every distinct secret ID used anywhere in the system.

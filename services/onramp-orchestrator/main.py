@@ -24,6 +24,11 @@ Config (env):
   cross-service enrichments (fail-soft/advisory), this is a compliance gate and
   fails CLOSED — an escalated, still-pending, or unverifiable screening check
   routes the order to awaiting_review instead of provider submission.
+  PAYMENT_APPROVAL_SERVICE_URL — opt-in per-order: only consulted when the
+  order was created with an approval_request_id (issue #21). Same fail-closed
+  posture as the compliance gate, independent of it — a pending, rejected,
+  expired, or unverifiable approval request routes the order to
+  awaiting_review instead of provider submission.
 
 Order/idempotency state is in-memory (single-instance sandbox). Production would
 back both with Redis (shared.http.RedisIdempotencyStore) — noted, not wired.
@@ -130,6 +135,7 @@ def create_order(req: OrderRequest, request: Request) -> Order:
         tenant_id=request.headers.get("x-tenant-id"),
         correlation_id=get_correlation_id(request) or _new_id("corr"),
         screening_check_id=req.screening_check_id,
+        approval_request_id=req.approval_request_id,
         created_at=now,
         updated_at=now,
     )
@@ -154,7 +160,7 @@ def get_order(order_id: str) -> Order:
     return _get_order(order_id)
 
 
-_SCREENING_GATED_STATUSES = frozenset({Status.PENDING, Status.AWAITING_REVIEW})
+_GATED_STATUSES = frozenset({Status.PENDING, Status.AWAITING_REVIEW})
 
 
 def _screening_is_clear(check_id: str) -> bool:
@@ -179,6 +185,26 @@ def _screening_is_clear(check_id: str) -> bool:
         return False
 
 
+def _approval_is_granted(request_id: str) -> bool:
+    """True only if payment-approval-service reports this request as
+    status='approved'. Fails CLOSED on every other outcome — no
+    PAYMENT_APPROVAL_SERVICE_URL configured, the service unreachable, a
+    non-200, a malformed body, or a status of 'pending'/'rejected'/'expired'
+    (same posture as _screening_is_clear — see its docstring)."""
+    base = os.environ.get("PAYMENT_APPROVAL_SERVICE_URL")
+    if not base:
+        logger.warning("approval request %s requested but PAYMENT_APPROVAL_SERVICE_URL "
+                        "unset (fail-closed, blocking)", request_id)
+        return False
+    try:
+        r = httpx.get(f"{base.rstrip('/')}/v1/approvals/{request_id}", timeout=3.0)
+        r.raise_for_status()
+        return r.json().get("status") == "approved"
+    except Exception:  # noqa: BLE001 — any failure fails closed, never silently proceeds
+        logger.warning("approval request %s unverifiable (fail-closed, blocking)", request_id)
+        return False
+
+
 @app.post("/v1/onramp/orders/{order_id}/advance", response_model=Order)
 def advance_order(order_id: str) -> Order:
     """Advance the sandbox order one lifecycle step and emit the funding event.
@@ -186,24 +212,30 @@ def advance_order(order_id: str) -> Order:
     pending → [awaiting_review] → processing (funding.processing) → completed
     (funding.completed). A terminal order is returned unchanged (idempotent).
 
-    Compliance gate (issue #22): an order created with screening_check_id
-    only leaves pending/awaiting_review once that check is verdict='clear' —
-    every other outcome routes to (or holds at) awaiting_review instead of
-    provider submission ("no provider execution occurs")."""
+    Two independent fail-closed gates, both opt-in per-order and both must
+    clear before the order may leave pending/awaiting_review:
+      - Compliance gate (issue #22): screening_check_id must be verdict='clear'.
+      - Approval gate (issue #21): approval_request_id must be status='approved'.
+    Either one blocking (or unset URL, or unverifiable) routes the order to
+    (or holds it at) awaiting_review instead of provider submission."""
     order = _get_order(order_id)
     if order.is_terminal():
         return order
-    if order.screening_check_id is not None and order.status in _SCREENING_GATED_STATUSES:
-        if not _screening_is_clear(order.screening_check_id):
+    if order.status in _GATED_STATUSES:
+        screening_blocked = (order.screening_check_id is not None
+                              and not _screening_is_clear(order.screening_check_id))
+        approval_blocked = (order.approval_request_id is not None
+                             and not _approval_is_granted(order.approval_request_id))
+        if screening_blocked or approval_blocked:
             if order.status != Status.AWAITING_REVIEW:
                 order.status = Status.AWAITING_REVIEW
                 order.updated_at = _now()
                 _orders[order_id] = order
                 _emit("funding.awaiting_review", order)
             return order
-        # Screening is clear — proceed as the pending -> processing step,
-        # regardless of whether we arrived here from pending directly or
-        # recovered from a prior awaiting_review.
+        # Both gates (whichever apply) are clear — proceed as the pending ->
+        # processing step, regardless of whether we arrived here from pending
+        # directly or recovered from a prior awaiting_review.
         order.status = Status.PENDING
     new_status = sandbox.next_status(order.status)
     order.status = new_status
