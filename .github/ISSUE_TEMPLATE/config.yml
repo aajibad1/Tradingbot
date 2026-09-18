@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Operating contract
+    url: https://github.com/aajibad1/Tradingbot/blob/main/africa_treasury_os_autonomous_engineering_team.md
+    about: The delivery contract every issue/PR in this repo follows.
+  - name: Delivery status
+    url: https://github.com/aajibad1/Tradingbot/blob/main/docs/STATUS.md
+    about: Current milestone, in-progress work, blockers, and risks.

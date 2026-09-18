@@ -1,0 +1,45 @@
+# CODEOWNERS — maps the operating contract's agent roles onto real paths.
+# Single-owner repo today (@aajibad1); this file documents REQUIRED REVIEW
+# DOMAINS per docs/adr + the contract's §10.3 review matrix, so that when a
+# second reviewer (human or agent) is added, ownership is already correct.
+# Update the @owner placeholders when a real second reviewer exists.
+
+# Ledger/payment state — contract §10.3: Ledger specialist + Staff Engineer + QA
+/services/accounts-service/        @aajibad1
+/services/wallet-service/          @aajibad1
+/services/trade-ledger/            @aajibad1
+
+# Provider adapters / webhooks — Integration + Security + QA
+/services/onramp-orchestrator/     @aajibad1
+/services/offramp-orchestrator/    @aajibad1
+/services/webhook-service/         @aajibad1
+/services/settlement-status/       @aajibad1
+/services/market-data/collectors/  @aajibad1
+
+# Auth/RBAC/tenant isolation — Security + Staff Engineer
+/services/core-api/auth.py         @aajibad1
+/services/partner-auth/            @aajibad1
+/shared/tenant.py                  @aajibad1
+/shared/http/                      @aajibad1
+
+# Terraform/CI/secrets/runtime — Platform/SRE + Security
+/infra/terraform/                  @aajibad1
+/.github/workflows/                @aajibad1
+/scripts/deploy.sh                 @aajibad1
+/scripts/wire_api_plane_urls.sh    @aajibad1
+
+# AI features — AI engineer + Security + Product
+/services/ai-ops-agent/            @aajibad1
+/services/opportunity-ranker/      @aajibad1
+/services/debate-service/          @aajibad1
+/services/approval-gate-service/   @aajibad1
+/services/agent-registry/          @aajibad1
+/services/agent-evals/             @aajibad1
+
+# Canonical cross-service contracts — Staff Engineer (any change here fans out)
+/shared/models/                    @aajibad1
+/shared/pubsub/publisher.py        @aajibad1
+/docs/adr/                         @aajibad1
+
+# Everything else
+*                                  @aajibad1
