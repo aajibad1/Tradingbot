@@ -1,5 +1,5 @@
 # Delivery Status
-Updated: 2026-09-17 (cycle 2)
+Updated: 2026-09-17 (cycle 3)
 
 ## Context
 
@@ -51,10 +51,14 @@ the yardstick (not re-litigating what's already built):
   producers (`ai-ops-agent`, `approval-gate-service`).
 - **Milestone 2 (Quotes/Routing/Approvals): partially met.** `routing-service`
   + `fx-rate-service` + `corridor-engine` give provider-neutral, explainable
-  route scoring (cost/settlement-estimate/reliability). **Gap:** no
-  multi-step human approval workflow or segregation-of-duties policy for
-  *payment* actions specifically (the AI governance approval gate exists for
-  *agent* actions, not for payment approval) — see Backlog below.
+  route scoring (cost/settlement-estimate/reliability). `compliance-service`
+  (issue #22, merged) now gives `onramp-orchestrator` a real, fail-closed
+  compliance gate — the "screening escalation → manual review, no provider
+  execution" scenario in the contract's financial scenario matrix (§11.2)
+  is a live, tested behavior, not just a documented intention. **Gap:** no
+  multi-step *human approval* workflow or segregation-of-duties policy for
+  payment actions specifically (the AI governance approval gate exists for
+  *agent* actions, not for payment approval) — tracked as issue #21.
 - **Milestone 3 (Ledger/Lifecycle): met for money representation, partial
   on unification.** `accounts-service` is a real, tested, Decimal-backed
   (`Numeric(38,8)`), balance-asserting double-entry ledger (`ledger.py`) —
@@ -113,23 +117,42 @@ the yardstick (not re-litigating what's already built):
   the 3 review-round findings was a real bug I would have shipped.
 - Added this file (`docs/STATUS.md`) as the contract's standing status
   report.
+- Implemented and **merged** #22: new `services/compliance-service/` —
+  deterministic KYC/KYB (pending→in_review→approved|rejected) and
+  sanctions/PEP screening (pending→clear|escalated) sandbox adapters,
+  every transition audited via `AuditLogEntry`. Wired into
+  `onramp-orchestrator` as a real, fail-**closed** gate (`Order` gains
+  optional `screening_check_id`; `advance()` blocks `pending→processing`
+  on the verdict being `clear`, unlike this repo's other advisory
+  fail-soft integrations) — deliberately avoiding the "built but nothing
+  calls it" pattern found repeatedly earlier this session
+  (signal-replay-service, venue-anomaly-detector, approval-gate-service).
+  Registered in CI, `deploy.sh`, terraform, and
+  `wire_api_plane_urls.sh`. [PR #25](https://github.com/aajibad1/Tradingbot/pull/25)
+  went through 2 review rounds: round 1 found a genuine bypass (the
+  fail-closed gate used a truthiness check, so `screening_check_id: ""`
+  skipped it entirely — the same "empty string conflated with omitted"
+  defect class as one of #23's findings), plus a dropped `tenant_id` in
+  audit metadata and an equivalent truthiness bug in the sandbox
+  simulator's outcome handling. All fixed and live-reproduced; round 2
+  approved after an exhaustive sweep for recurrences of the same defect
+  class. 24 compliance-service tests + 17 onramp-orchestrator tests
+  (41 total, was 16), full 42-service sweep, ruff/bandit/terraform clean.
 
 ## In progress
 
-- Next up: issue #22 (KYC/KYB + screening sandbox
-  adapters) — highest-priority remaining unblocked P1, no dependency on
-  #21 or the now-merged #20/#23.
+- Nothing currently in flight. Next candidate: issue #21 (payment
+  approval workflow with segregation-of-duties) — the remaining open P1,
+  no dependency on the now-merged #20/#22/#23/#25.
 
 ## Blocked
 
-- **KYC/KYB and sanctions/PEP screening**: `docs/09-security-compliance.md`
-  lists these as required compliance controls, but no service implements
-  even a sandbox simulation of them yet (contract §7.4 requires a
-  "KYC/KYB status simulation" and "sanctions/compliance screening
-  simulation" adapter at minimum). No legal/partner decision has been made
-  per this repo's own conventions — `docs/REGULATORY_BRIEF.md` exists for
-  exactly this reason. Not fabricating compliance status; flagging as an
-  open backlog item pending a real decision, per contract §12's hard rule
+- **Real KYC/KYB/sanctions/PEP vendor integration**: `services/compliance-service`
+  (issue #22, merged) closes the *sandbox simulation* requirement (contract
+  §7.4). Real vendor integration remains blocked on a legal/partner
+  decision not yet made — `docs/REGULATORY_BRIEF.md` exists for exactly
+  this reason. Not fabricating compliance status; the service's own module
+  docstring states SANDBOX ONLY throughout, per contract §12's hard rule
   against research agents producing compliance claims.
 - **Real-money/custody/lending/live-partner execution**: correctly not
   enabled anywhere in this repo (`live_enabled=false`, PAPER-only execution
@@ -164,19 +187,19 @@ the yardstick (not re-litigating what's already built):
   real funds), tracked as a lower-priority follow-up in `docs/adr/0004`.
 - **Security/privacy**: none new identified this cycle beyond what
   `docs/09-security-compliance.md` already tracks as pre-go-live gates.
-- **Compliance/partner**: KYC/KYB/screening simulation gap (see Blocked).
-  No regulatory or partner claims have been made; `docs/REGULATORY_BRIEF.md`
+- **Compliance/partner**: sandbox simulation gap (see Blocked) is closed;
+  real vendor integration remains blocked on a legal/partner decision. No
+  regulatory or partner claims have been made; `docs/REGULATORY_BRIEF.md`
   remains the source of truth for counsel-facing questions.
 - **Reliability**: none new identified this cycle.
 
 ## Next prioritized work
 
-1. File real GitHub issues for the two P1 gaps: wallet-service Decimal/ledger
-   migration; payment-approval (not agent-approval) workflow with
-   segregation-of-duties.
-2. Implement a KYC/KYB status-simulation adapter (contract §7.4) — sandbox
-   only, matching the existing adapter-simulation conventions already used
-   throughout this repo (corridor-engine, onramp/offramp providers).
+1. Issue #21: payment approval workflow with segregation-of-duties — the
+   remaining open P1, no dependency on the now-merged #20/#22.
+2. Wire the same fail-closed screening gate into `offramp-orchestrator`
+   (only `onramp-orchestrator` got it in #25's PR, to keep that PR
+   focused — noted as a follow-up in its own description).
 3. Wire `wallet-service` balance mutations through `accounts-service`'s
    ledger (or promote `accounts-service` to be the sole balance authority
    and make `wallet-service` a read/aggregation view over it) instead of
